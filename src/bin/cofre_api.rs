@@ -1,0 +1,301 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use clap::Parser;
+use cofreSenhaRust::{default_vault_path, load_vault};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+#[derive(Parser, Debug)]
+#[command(name = "cofre-api")]
+#[command(about = "API local para integracao com extensao do navegador")]
+struct ApiArgs {
+    #[arg(long, default_value_t = 5474)]
+    port: u16,
+
+    #[arg(long, default_value_t = 1800)]
+    session_ttl_secs: u64,
+}
+
+#[derive(Clone)]
+struct AppState {
+    sessions: Arc<Mutex<HashMap<String, SessionState>>>,
+    session_ttl_secs: u64,
+}
+
+#[derive(Debug, Clone)]
+struct SessionState {
+    master_password: String,
+    expires_at_unix: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct HealthResponse {
+    status: &'static str,
+    now_unix: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct UnlockRequest {
+    master_password: String,
+}
+
+#[derive(Debug, Serialize)]
+struct UnlockResponse {
+    session_token: String,
+    expires_at_unix: u64,
+    ttl_secs: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct EntrySummary {
+    id: String,
+    servico: String,
+    usuario: String,
+    url: Option<String>,
+    atualizado_em: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ListEntriesResponse {
+    entries: Vec<EntrySummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct PasswordResponse {
+    senha: String,
+}
+
+#[tokio::main]
+async fn main() {
+    if let Err(err) = run().await {
+        eprintln!("Erro: {err}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), String> {
+    let args = ApiArgs::parse();
+
+    let shared = AppState {
+        sessions: Arc::new(Mutex::new(HashMap::new())),
+        session_ttl_secs: args.session_ttl_secs,
+    };
+
+    let app = Router::new()
+        .route("/api/v1/health", get(health))
+        .route("/api/v1/unlock", post(unlock))
+        .route("/api/v1/entries/:session_token", get(list_entries))
+        .route(
+            "/api/v1/entries/:session_token/:entry_id/password",
+            get(get_entry_password),
+        )
+        .route("/api/v1/lock/:session_token", post(lock_session))
+        .with_state(shared);
+
+    let addr = format!("127.0.0.1:{}", args.port);
+    let listener = tokio::net::TcpListener::bind(addr.as_str())
+        .await
+        .map_err(|err| err.to_string())?;
+
+    println!("Cofre API local em http://{}", addr);
+    axum::serve(listener, app)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok",
+        now_unix: now_unix(),
+    })
+}
+
+async fn unlock(
+    State(state): State<AppState>,
+    Json(payload): Json<UnlockRequest>,
+) -> Result<Json<UnlockResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if payload.master_password.trim().is_empty() {
+        return Err(err_bad_request("Senha mestra nao informada"));
+    }
+
+    let vault_path = default_vault_path().map_err(err_internal)?;
+    if !vault_path.exists() {
+        return Err(err_not_found("Cofre nao encontrado"));
+    }
+
+    load_vault(vault_path.as_path(), payload.master_password.as_str()).map_err(|err| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: format!("Nao foi possivel desbloquear o cofre: {err}"),
+            }),
+        )
+    })?;
+
+    let token = format!("{}{}", Uuid::new_v4(), Uuid::new_v4());
+    let expires_at_unix = now_unix().saturating_add(state.session_ttl_secs);
+
+    let mut guard = state
+        .sessions
+        .lock()
+        .map_err(|_| err_internal("Falha de sincronizacao de sessao".to_string()))?;
+
+    guard.insert(
+        token.clone(),
+        SessionState {
+            master_password: payload.master_password,
+            expires_at_unix,
+        },
+    );
+
+    Ok(Json(UnlockResponse {
+        session_token: token,
+        expires_at_unix,
+        ttl_secs: state.session_ttl_secs,
+    }))
+}
+
+async fn list_entries(
+    State(state): State<AppState>,
+    Path(session_token): Path<String>,
+) -> Result<Json<ListEntriesResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let master_password = resolve_session_master_password(&state, session_token.as_str())?;
+    let vault = read_vault_with_master(master_password.as_str())?;
+
+    let entries = vault
+        .entries
+        .into_iter()
+        .map(|entry| EntrySummary {
+            id: entry.id.to_string(),
+            servico: entry.servico,
+            usuario: entry.usuario,
+            url: entry.url,
+            atualizado_em: entry.atualizado_em,
+        })
+        .collect();
+
+    Ok(Json(ListEntriesResponse { entries }))
+}
+
+async fn get_entry_password(
+    State(state): State<AppState>,
+    Path((session_token, entry_id)): Path<(String, String)>,
+) -> Result<Json<PasswordResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let master_password = resolve_session_master_password(&state, session_token.as_str())?;
+    let vault = read_vault_with_master(master_password.as_str())?;
+
+    let entry = vault
+        .entries
+        .iter()
+        .find(|item| item.id.to_string() == entry_id)
+        .ok_or_else(|| err_not_found("Entrada nao encontrada"))?;
+
+    Ok(Json(PasswordResponse {
+        senha: entry.senha.clone(),
+    }))
+}
+
+async fn lock_session(
+    State(state): State<AppState>,
+    Path(session_token): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    let mut guard = state
+        .sessions
+        .lock()
+        .map_err(|_| err_internal("Falha de sincronizacao de sessao".to_string()))?;
+
+    if guard.remove(session_token.as_str()).is_none() {
+        return Err(err_not_found("Sessao nao encontrada"));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn resolve_session_master_password(
+    state: &AppState,
+    session_token: &str,
+) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    let mut guard = state
+        .sessions
+        .lock()
+        .map_err(|_| err_internal("Falha de sincronizacao de sessao".to_string()))?;
+
+    let Some(session) = guard.get(session_token) else {
+        return Err(err_unauthorized("Sessao invalida"));
+    };
+
+    if is_expired(session.expires_at_unix) {
+        guard.remove(session_token);
+        return Err(err_unauthorized("Sessao expirada"));
+    }
+
+    Ok(session.master_password.clone())
+}
+
+fn read_vault_with_master(master_password: &str) -> Result<cofreSenhaRust::PlainVault, (StatusCode, Json<ErrorResponse>)> {
+    let vault_path = default_vault_path().map_err(err_internal)?;
+    load_vault(vault_path.as_path(), master_password).map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Falha ao ler cofre: {err}"),
+            }),
+        )
+    })
+}
+
+fn is_expired(expires_at_unix: u64) -> bool {
+    now_unix() >= expires_at_unix
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::from_secs(0))
+        .as_secs()
+}
+
+fn err_bad_request(message: &str) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse {
+            error: message.to_string(),
+        }),
+    )
+}
+
+fn err_not_found(message: &str) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: message.to_string(),
+        }),
+    )
+}
+
+fn err_unauthorized(message: &str) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(ErrorResponse {
+            error: message.to_string(),
+        }),
+    )
+}
+
+fn err_internal(message: String) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorResponse { error: message }),
+    )
+}

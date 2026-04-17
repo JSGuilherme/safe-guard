@@ -1,5 +1,17 @@
 ## Plan: Desktop Windows para Cofre de Senhas
 
+## Status Atual (2026-04-17)
+
+- Fase 1 concluida parcialmente: nucleo extraido para biblioteca compartilhada em src/lib.rs e CLI refatorada para usar o core.
+- Fase 2 concluida (MVP): app desktop inicial criado em src/bin/cofre_desktop.rs com fluxo bloqueado/desbloqueado.
+- Fase 3 iniciada parcialmente: desktop ja consegue desbloquear cofre e listar entradas.
+- Fase 4 iniciada parcialmente: desktop com CRUD basico (adicionar/atualizar/remover) e persistencia no vault.
+- Tela inicial em implementacao: primeira abertura agora separa onboarding de primeiro acesso e login por cofre existente.
+- UX do onboarding/login refinada parcialmente: mensagens de ajuda em contexto, navegacao entre telas e erros orientados a acao.
+- Recurso de produtividade adicionado: botao Copiar senha em cada card da listagem (servico, usuario e url), com feedback visual de copia.
+- Fase A da integracao com extensao iniciada: API local minima criada em src/bin/cofre_api.rs com unlock, listagem de entradas, leitura de senha por id e lock de sessao.
+- Proximos passos imediatos: reforcar seguranca da API local (auth por header, whitelist de origem e rate limit), depois iniciar scaffold da extensao.
+
 Recomendacao: usar egui/eframe (Rust puro) para a primeira versao desktop Windows, reaproveitando a logica de cofre existente. Essa abordagem minimiza superficie de ataque para um app de senhas, simplifica distribuicao (exe unico) e acelera entrega do MVP.
 
 **Steps**
