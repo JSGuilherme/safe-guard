@@ -67,10 +67,14 @@ cargo run --bin cofre_api -- --port 5474 --session-ttl-secs 1800
 Endpoints iniciais:
 
 - `GET /api/v1/health`
+- `GET /api/v1/vault`
+- `POST /api/v1/vault`
 - `POST /api/v1/unlock`
-- `GET /api/v1/entries/:session_token`
-- `GET /api/v1/entries/:session_token/:entry_id/password`
-- `POST /api/v1/lock/:session_token`
+- `GET /api/v1/entries/{session_token}`
+- `POST /api/v1/entries/{session_token}`
+- `DELETE /api/v1/entries/{session_token}/{entry_id}`
+- `GET /api/v1/entries/{session_token}/{entry_id}/password`
+- `POST /api/v1/lock/{session_token}`
 
 ## Fluxo da tela inicial
 

@@ -10,6 +10,7 @@
 - UX do onboarding/login refinada parcialmente: mensagens de ajuda em contexto, navegacao entre telas e erros orientados a acao.
 - Recurso de produtividade adicionado: botao Copiar senha em cada card da listagem (servico, usuario e url), com feedback visual de copia.
 - Fase A da integracao com extensao iniciada: API local minima criada em src/bin/cofre_api.rs com unlock, listagem de entradas, leitura de senha por id e lock de sessao.
+- Migracao de UI iniciada com scaffold Tauri em ui-tauri/ (frontend Vite + backend Rust com comandos health/unlock/list/copy/lock).
 - Proximos passos imediatos: reforcar seguranca da API local (auth por header, whitelist de origem e rate limit), depois iniciar scaffold da extensao.
 
 Recomendacao: usar egui/eframe (Rust puro) para a primeira versao desktop Windows, reaproveitando a logica de cofre existente. Essa abordagem minimiza superficie de ataque para um app de senhas, simplifica distribuicao (exe unico) e acelera entrega do MVP.

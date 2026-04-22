@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CofreSenhaRust</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <h1>Cofre de Senhas</h1>
+        <p>Versao Tauri em desenvolvimento</p>
+      </header>
+
+      <section class="card" id="session-section">
+        <h2>Sessao</h2>
+        <label for="master-password">Senha mestra</label>
+        <input id="master-password" type="password" placeholder="Digite sua senha" />
+        <div class="actions">
+          <button id="unlock-btn">Desbloquear</button>
+          <button id="lock-btn" class="ghost">Bloquear</button>
+        </div>
+      </section>
+
+      <section class="card" id="vault-section">
+        <div class="vault-header">
+          <h2>Entradas</h2>
+          <button id="refresh-btn" class="ghost">Atualizar</button>
+        </div>
+        <div id="entries"></div>
+      </section>
+
+      <footer id="status" class="status">Pronto</footer>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

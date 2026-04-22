@@ -1,1 +1,9 @@
 /target
+ui-tauri/node_modules/
+ui-tauri/dist/
+ui-tauri/.vite/
+ui-tauri/.npm/
+ui-tauri/.pnpm-store/
+ui-tauri/yarn-error.log*
+ui-tauri/npm-debug.log*
+ui-tauri/src-tauri/target/

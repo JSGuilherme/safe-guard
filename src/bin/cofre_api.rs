@@ -4,10 +4,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use clap::Parser;
-use cofreSenhaRust::{default_vault_path, load_vault};
+use cofreSenhaRust::{
+    NewEntry, create_new_vault, default_vault_path, load_vault, save_vault, upsert_entry,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -50,11 +52,36 @@ struct UnlockRequest {
     master_password: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct CreateVaultRequest {
+    master_password: String,
+}
+
 #[derive(Debug, Serialize)]
 struct UnlockResponse {
     session_token: String,
     expires_at_unix: u64,
     ttl_secs: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultStatusResponse {
+    exists: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct EntryUpsertRequest {
+    servico: String,
+    usuario: String,
+    senha: String,
+    url: Option<String>,
+    notas: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EntryUpsertResponse {
+    entry_id: String,
+    created: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -94,13 +121,16 @@ async fn run() -> Result<(), String> {
 
     let app = Router::new()
         .route("/api/v1/health", get(health))
+        .route("/api/v1/vault", get(vault_status).post(create_vault))
         .route("/api/v1/unlock", post(unlock))
-        .route("/api/v1/entries/:session_token", get(list_entries))
+        .route("/api/v1/entries/{session_token}", get(list_entries))
+        .route("/api/v1/entries/{session_token}", post(create_entry))
         .route(
-            "/api/v1/entries/:session_token/:entry_id/password",
+            "/api/v1/entries/{session_token}/{entry_id}/password",
             get(get_entry_password),
         )
-        .route("/api/v1/lock/:session_token", post(lock_session))
+        .route("/api/v1/entries/{session_token}/{entry_id}", delete(delete_entry))
+        .route("/api/v1/lock/{session_token}", post(lock_session))
         .with_state(shared);
 
     let addr = format!("127.0.0.1:{}", args.port);
@@ -119,6 +149,39 @@ async fn health() -> Json<HealthResponse> {
         status: "ok",
         now_unix: now_unix(),
     })
+}
+
+async fn vault_status() -> Result<Json<VaultStatusResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let vault_path = default_vault_path().map_err(err_internal)?;
+    Ok(Json(VaultStatusResponse {
+        exists: vault_path.exists(),
+    }))
+}
+
+async fn create_vault(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateVaultRequest>,
+) -> Result<(StatusCode, Json<UnlockResponse>), (StatusCode, Json<ErrorResponse>)> {
+    if payload.master_password.trim().is_empty() {
+        return Err(err_bad_request("Senha mestra nao informada"));
+    }
+
+    let vault_path = default_vault_path().map_err(err_internal)?;
+    if vault_path.exists() {
+        return Err(err_conflict("Cofre ja existe"));
+    }
+
+    create_new_vault(vault_path.as_path(), payload.master_password.as_str()).map_err(|err| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("Nao foi possivel criar o cofre: {err}"),
+            }),
+        )
+    })?;
+
+    let session = create_session_for_master(&state, payload.master_password)?;
+    Ok((StatusCode::CREATED, Json(session)))
 }
 
 async fn unlock(
@@ -143,35 +206,15 @@ async fn unlock(
         )
     })?;
 
-    let token = format!("{}{}", Uuid::new_v4(), Uuid::new_v4());
-    let expires_at_unix = now_unix().saturating_add(state.session_ttl_secs);
-
-    let mut guard = state
-        .sessions
-        .lock()
-        .map_err(|_| err_internal("Falha de sincronizacao de sessao".to_string()))?;
-
-    guard.insert(
-        token.clone(),
-        SessionState {
-            master_password: payload.master_password,
-            expires_at_unix,
-        },
-    );
-
-    Ok(Json(UnlockResponse {
-        session_token: token,
-        expires_at_unix,
-        ttl_secs: state.session_ttl_secs,
-    }))
+    let session = create_session_for_master(&state, payload.master_password)?;
+    Ok(Json(session))
 }
 
 async fn list_entries(
     State(state): State<AppState>,
     Path(session_token): Path<String>,
 ) -> Result<Json<ListEntriesResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let master_password = resolve_session_master_password(&state, session_token.as_str())?;
-    let vault = read_vault_with_master(master_password.as_str())?;
+    let vault = read_vault_for_session(&state, session_token.as_str())?;
 
     let entries = vault
         .entries
@@ -188,12 +231,56 @@ async fn list_entries(
     Ok(Json(ListEntriesResponse { entries }))
 }
 
+async fn create_entry(
+    State(state): State<AppState>,
+    Path(session_token): Path<String>,
+    Json(payload): Json<EntryUpsertRequest>,
+) -> Result<(StatusCode, Json<EntryUpsertResponse>), (StatusCode, Json<ErrorResponse>)> {
+    if payload.servico.trim().is_empty() {
+        return Err(err_bad_request("Servico nao informado"));
+    }
+    if payload.usuario.trim().is_empty() {
+        return Err(err_bad_request("Usuario nao informado"));
+    }
+    if payload.senha.trim().is_empty() {
+        return Err(err_bad_request("Senha nao informada"));
+    }
+
+    let (master_password, mut vault) = read_vault_and_master_for_session(&state, session_token.as_str())?;
+    let was_update = upsert_entry(
+        &mut vault,
+        NewEntry {
+            servico: payload.servico.trim().to_string(),
+            usuario: payload.usuario.trim().to_string(),
+            senha: payload.senha,
+            url: normalize_optional(payload.url.as_deref()),
+            notas: normalize_optional(payload.notas.as_deref()),
+        },
+    );
+
+    save_vault_for_session(master_password.as_str(), &vault)?;
+
+    let entry = vault
+        .entries
+        .iter()
+        .find(|item| item.servico == payload.servico.trim())
+        .ok_or_else(|| err_internal("Falha ao localizar entrada salva".to_string()))?;
+
+    let status = if was_update { StatusCode::OK } else { StatusCode::CREATED };
+    Ok((
+        status,
+        Json(EntryUpsertResponse {
+            entry_id: entry.id.to_string(),
+            created: !was_update,
+        }),
+    ))
+}
+
 async fn get_entry_password(
     State(state): State<AppState>,
     Path((session_token, entry_id)): Path<(String, String)>,
 ) -> Result<Json<PasswordResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let master_password = resolve_session_master_password(&state, session_token.as_str())?;
-    let vault = read_vault_with_master(master_password.as_str())?;
+    let vault = read_vault_for_session(&state, session_token.as_str())?;
 
     let entry = vault
         .entries
@@ -204,6 +291,23 @@ async fn get_entry_password(
     Ok(Json(PasswordResponse {
         senha: entry.senha.clone(),
     }))
+}
+
+async fn delete_entry(
+    State(state): State<AppState>,
+    Path((session_token, entry_id)): Path<(String, String)>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    let (master_password, mut vault) = read_vault_and_master_for_session(&state, session_token.as_str())?;
+
+    let before = vault.entries.len();
+    vault.entries.retain(|entry| entry.id.to_string() != entry_id);
+
+    if vault.entries.len() == before {
+        return Err(err_not_found("Entrada nao encontrada"));
+    }
+
+    save_vault_for_session(master_password.as_str(), &vault)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn lock_session(
@@ -243,7 +347,53 @@ fn resolve_session_master_password(
     Ok(session.master_password.clone())
 }
 
-fn read_vault_with_master(master_password: &str) -> Result<cofreSenhaRust::PlainVault, (StatusCode, Json<ErrorResponse>)> {
+fn create_session_for_master(
+    state: &AppState,
+    master_password: String,
+) -> Result<UnlockResponse, (StatusCode, Json<ErrorResponse>)> {
+    let token = format!("{}{}", Uuid::new_v4(), Uuid::new_v4());
+    let expires_at_unix = now_unix().saturating_add(state.session_ttl_secs);
+
+    let mut guard = state
+        .sessions
+        .lock()
+        .map_err(|_| err_internal("Falha de sincronizacao de sessao".to_string()))?;
+
+    guard.insert(
+        token.clone(),
+        SessionState {
+            master_password,
+            expires_at_unix,
+        },
+    );
+
+    Ok(UnlockResponse {
+        session_token: token,
+        expires_at_unix,
+        ttl_secs: state.session_ttl_secs,
+    })
+}
+
+fn read_vault_for_session(
+    state: &AppState,
+    session_token: &str,
+) -> Result<cofreSenhaRust::PlainVault, (StatusCode, Json<ErrorResponse>)> {
+    let master_password = resolve_session_master_password(state, session_token)?;
+    read_vault_with_master(master_password.as_str())
+}
+
+fn read_vault_and_master_for_session(
+    state: &AppState,
+    session_token: &str,
+) -> Result<(String, cofreSenhaRust::PlainVault), (StatusCode, Json<ErrorResponse>)> {
+    let master_password = resolve_session_master_password(state, session_token)?;
+    let vault = read_vault_with_master(master_password.as_str())?;
+    Ok((master_password, vault))
+}
+
+fn read_vault_with_master(
+    master_password: &str,
+) -> Result<cofreSenhaRust::PlainVault, (StatusCode, Json<ErrorResponse>)> {
     let vault_path = default_vault_path().map_err(err_internal)?;
     load_vault(vault_path.as_path(), master_password).map_err(|err| {
         (
@@ -252,6 +402,32 @@ fn read_vault_with_master(master_password: &str) -> Result<cofreSenhaRust::Plain
                 error: format!("Falha ao ler cofre: {err}"),
             }),
         )
+    })
+}
+
+fn save_vault_for_session(
+    master_password: &str,
+    vault: &cofreSenhaRust::PlainVault,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let vault_path = default_vault_path().map_err(err_internal)?;
+    save_vault(vault_path.as_path(), master_password, vault).map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Falha ao salvar cofre: {err}"),
+            }),
+        )
+    })
+}
+
+fn normalize_optional(value: Option<&str>) -> Option<String> {
+    value.and_then(|text| {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     })
 }
 
@@ -287,6 +463,15 @@ fn err_not_found(message: &str) -> (StatusCode, Json<ErrorResponse>) {
 fn err_unauthorized(message: &str) -> (StatusCode, Json<ErrorResponse>) {
     (
         StatusCode::UNAUTHORIZED,
+        Json(ErrorResponse {
+            error: message.to_string(),
+        }),
+    )
+}
+
+fn err_conflict(message: &str) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::CONFLICT,
         Json(ErrorResponse {
             error: message.to_string(),
         }),
