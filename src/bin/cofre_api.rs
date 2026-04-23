@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{delete, get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use clap::Parser;
 use cofreSenhaRust::{
@@ -78,6 +78,15 @@ struct EntryUpsertRequest {
     notas: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct EntryEditRequest {
+    servico: Option<String>,
+    usuario: Option<String>,
+    senha: Option<String>,
+    url: Option<String>,
+    notas: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct EntryUpsertResponse {
     entry_id: String,
@@ -101,6 +110,11 @@ struct ListEntriesResponse {
 #[derive(Debug, Serialize)]
 struct PasswordResponse {
     senha: String,
+}
+
+#[derive(Debug, Serialize)]
+struct NotesResponse {
+    notas: Option<String>,
 }
 
 #[tokio::main]
@@ -129,7 +143,14 @@ async fn run() -> Result<(), String> {
             "/api/v1/entries/{session_token}/{entry_id}/password",
             get(get_entry_password),
         )
-        .route("/api/v1/entries/{session_token}/{entry_id}", delete(delete_entry))
+        .route(
+            "/api/v1/entries/{session_token}/{entry_id}/notes",
+            get(get_entry_notes),
+        )
+        .route(
+            "/api/v1/entries/{session_token}/{entry_id}",
+            put(edit_entry).delete(delete_entry),
+        )
         .route("/api/v1/lock/{session_token}", post(lock_session))
         .with_state(shared);
 
@@ -290,6 +311,71 @@ async fn get_entry_password(
 
     Ok(Json(PasswordResponse {
         senha: entry.senha.clone(),
+    }))
+}
+
+async fn get_entry_notes(
+    State(state): State<AppState>,
+    Path((session_token, entry_id)): Path<(String, String)>,
+) -> Result<Json<NotesResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let vault = read_vault_for_session(&state, session_token.as_str())?;
+
+    let entry = vault
+        .entries
+        .iter()
+        .find(|item| item.id.to_string() == entry_id)
+        .ok_or_else(|| err_not_found("Entrada nao encontrada"))?;
+
+    Ok(Json(NotesResponse {
+        notas: entry.notas.clone(),
+    }))
+}
+
+async fn edit_entry(
+    State(state): State<AppState>,
+    Path((session_token, entry_id)): Path<(String, String)>,
+    Json(payload): Json<EntryEditRequest>,
+) -> Result<Json<EntryUpsertResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let (master_password, mut vault) = read_vault_and_master_for_session(&state, session_token.as_str())?;
+
+    let entry = vault
+        .entries
+        .iter_mut()
+        .find(|item| item.id.to_string() == entry_id)
+        .ok_or_else(|| err_not_found("Entrada nao encontrada"))?;
+
+    if let Some(servico) = payload.servico {
+        if !servico.trim().is_empty() {
+            entry.servico = servico.trim().to_string();
+        }
+    }
+
+    if let Some(usuario) = payload.usuario {
+        if !usuario.trim().is_empty() {
+            entry.usuario = usuario.trim().to_string();
+        }
+    }
+
+    if let Some(senha) = payload.senha {
+        if !senha.trim().is_empty() {
+            entry.senha = senha;
+        }
+    }
+
+    if let Some(url) = payload.url {
+        entry.url = normalize_optional(Some(url.as_str()));
+    }
+
+    if let Some(notas) = payload.notas {
+        entry.notas = normalize_optional(Some(notas.as_str()));
+    }
+
+    let entry_id_response = entry.id.to_string();
+    save_vault_for_session(master_password.as_str(), &vault)?;
+
+    Ok(Json(EntryUpsertResponse {
+        entry_id: entry_id_response,
+        created: false,
     }))
 }
 
