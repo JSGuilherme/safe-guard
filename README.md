@@ -64,6 +64,62 @@ Com parametros opcionais:
 cargo run --bin cofre_api -- --port 5474 --session-ttl-secs 1800
 ```
 
+### Instalar API para iniciar com o Windows (facil para usuario)
+
+Opcao mais simples (duplo clique):
+
+- Execute `scripts\\windows\\install_cofre_api.cmd`.
+
+No PowerShell (executar como Administrador), rode na raiz do projeto:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install_cofre_api.ps1
+```
+
+O script:
+- compila `cofre_api` em modo release,
+- copia o executavel para `%LOCALAPPDATA%\CofreSenhaRust\api`,
+- cria/atualiza a tarefa agendada `CofreApi`,
+- configura inicio automatico no logon e reinicio automatico em falhas.
+
+Parametros uteis:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install_cofre_api.ps1 -Port 5474 -SessionTtlSecs 1800 -TaskName CofreApi
+```
+
+Desinstalar:
+
+Opcao por duplo clique:
+
+- Execute `scripts\\windows\\uninstall_cofre_api.cmd`.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\uninstall_cofre_api.ps1
+```
+
+### Gerar Setup.exe da API (distribuicao para usuario final)
+
+1. Instale o Inno Setup 6.
+2. Na raiz do projeto, rode:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\build_setup.ps1 -Version 0.1.0
+```
+
+O setup sera gerado em `dist\windows`.
+
+Arquivos usados no empacotamento:
+- `installer\windows\cofre_api.iss`
+- `installer\windows\register_task.ps1`
+- `installer\windows\unregister_task.ps1`
+
+Comportamento do instalador:
+- instala `cofre_api.exe` em `%LOCALAPPDATA%\CofreSenhaRust\api`,
+- registra inicializacao automatica da API no logon,
+- inicia a API apos a instalacao,
+- remove a tarefa automatica na desinstalacao.
+
 Endpoints iniciais:
 
 - `GET /api/v1/health`
