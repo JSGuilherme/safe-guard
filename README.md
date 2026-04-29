@@ -1,32 +1,32 @@
 # CofreSenhaRust
 
-Aplicacao desktop em Rust para armazenar senhas localmente com criptografia forte e interface para Windows.
+Aplicacao em Rust para armazenar senhas localmente com criptografia forte, com foco no core compartilhado, CLI e API local para Windows.
 
 O projeto esta sendo construido em fases:
 - Um core em Rust com criptografia e persistencia do cofre.
 - Uma CLI para operacoes rapidas de manutencao.
-- Uma interface desktop com egui/eframe para uso diario.
+- Uma API local para integracao com extensoes e outras interfaces.
 
 ## Funcionalidades atuais
 
 - Criacao de cofre com senha mestra.
 - Armazenamento criptografado das entradas.
 - Listagem, consulta, adicao e remocao de credenciais.
-- Interface desktop inicial com fluxo de primeiro acesso e login.
+- API local para unlock, listagem, leitura e escrita de entradas.
 - Persistencia local no perfil do usuario do Windows.
 
 ## Estrutura do projeto
 
 - `src/lib.rs`: nucleo do cofre, criptografia e persistencia.
 - `src/main.rs`: CLI principal.
-- `src/bin/cofre_desktop.rs`: interface desktop inicial.
-- `src/bin/cofre_api.rs`: API local inicial para integracao com extensao.
+- `src/bin/cofre_api.rs`: API local para integracao com extensao e outras interfaces.
+- `src/bin/cofre_desktop.rs`: interface desktop Rust existente.
 - `plan.md`: plano de evolucao do projeto.
 
 ## Requisitos
 
 - Rust recente instalado via rustup.
-- Windows para a experiencia principal de desktop.
+- Windows para a experiencia principal de desktop e API local.
 
 ## Como executar
 
@@ -46,13 +46,7 @@ cargo run -- get --servico github
 cargo run -- remove --servico github
 ```
 
-### Iniciar a interface desktop
-
-```bash
-cargo run --bin cofre_desktop
-```
-
-### Iniciar a API local (fase inicial da extensao)
+### Iniciar a API local
 
 ```bash
 cargo run --bin cofre_api
@@ -64,13 +58,19 @@ Com parametros opcionais:
 cargo run --bin cofre_api -- --port 5474 --session-ttl-secs 1800
 ```
 
-### Instalar API para iniciar com o Windows (facil para usuario)
+### Iniciar a interface desktop Rust existente
 
-Opcao mais simples (duplo clique):
+```bash
+cargo run --bin cofre_desktop
+```
+
+### Instalar API para iniciar com o Windows
+
+Opcao mais simples:
 
 - Execute `scripts\\windows\\install_cofre_api.cmd`.
 
-No PowerShell (executar como Administrador), rode na raiz do projeto:
+No PowerShell, na raiz do projeto:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\install_cofre_api.ps1
@@ -79,7 +79,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install_cofre_api.ps1
 O script:
 - compila `cofre_api` em modo release,
 - copia o executavel para `%LOCALAPPDATA%\CofreSenhaRust\api`,
-- cria/atualiza a tarefa agendada `CofreApi`,
+- cria ou atualiza a tarefa agendada `CofreApi`,
 - configura inicio automatico no logon e reinicio automatico em falhas.
 
 Parametros uteis:
@@ -90,15 +90,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install_cofre_api.ps1
 
 Desinstalar:
 
-Opcao por duplo clique:
-
 - Execute `scripts\\windows\\uninstall_cofre_api.cmd`.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\uninstall_cofre_api.ps1
 ```
 
-### Gerar Setup.exe da API (distribuicao para usuario final)
+### Gerar Setup.exe da API
 
 1. Instale o Inno Setup 6.
 2. Na raiz do projeto, rode:
@@ -120,7 +118,7 @@ Comportamento do instalador:
 - inicia a API apos a instalacao,
 - remove a tarefa automatica na desinstalacao.
 
-Endpoints iniciais:
+## Endpoints iniciais
 
 - `GET /api/v1/health`
 - `GET /api/v1/vault`
@@ -128,18 +126,11 @@ Endpoints iniciais:
 - `POST /api/v1/unlock`
 - `GET /api/v1/entries/{session_token}`
 - `POST /api/v1/entries/{session_token}`
+- `PUT /api/v1/entries/{session_token}/{entry_id}`
 - `DELETE /api/v1/entries/{session_token}/{entry_id}`
 - `GET /api/v1/entries/{session_token}/{entry_id}/password`
+- `GET /api/v1/entries/{session_token}/{entry_id}/notes`
 - `POST /api/v1/lock/{session_token}`
-
-## Fluxo da tela inicial
-
-Ao abrir a interface desktop, a aplicacao verifica se o cofre ja existe:
-
-- Se nao existir, mostra a tela de cadastro inicial da senha mestra.
-- Se existir, mostra a tela de login para desbloquear o cofre.
-
-Isso evita tentar descriptografar o cofre antes da hora e deixa o primeiro acesso mais claro para o usuario.
 
 ## Onde o cofre fica salvo
 
@@ -154,20 +145,19 @@ O arquivo do cofre e gravado no diretorio local de dados do usuario, em algo com
 - A criptografia do arquivo usa ChaCha20-Poly1305.
 - A senha mestra nao e armazenada em texto puro no arquivo.
 
-## Limitações atuais
+## Limitacoes atuais
 
 - Ainda nao ha autofill em navegador.
 - Ainda nao ha gerenciador de senha com sincronizacao em nuvem.
-- A interface desktop esta em evolucao e ainda pode mudar de layout.
+- A API local ainda precisa de endurecimento adicional de seguranca para exposicao mais ampla.
 
 ## Roadmap
 
-1. Refinar a tela inicial e o onboarding.
-2. Adicionar tela de detalhe e edicao de entradas.
-3. Implementar limpeza de dados sensiveis em memoria.
-4. Adicionar limpeza automatica da area de transferencia.
-5. Empacotar a versao Windows com instalador.
-6. Evoluir para autofill em aplicacoes web.
+1. Reforcar seguranca e estabilidade da API local.
+2. Implementar limpeza de dados sensiveis em memoria.
+3. Adicionar limpeza automatica da area de transferencia.
+4. Empacotar a versao Windows com instalador.
+5. Evoluir a integracao com extensoes e interfaces externas.
 
 ## Licenca
 

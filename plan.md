@@ -1,47 +1,35 @@
-## Plan: Desktop Windows para Cofre de Senhas
+## Plan: Core Rust + API Local
 
-## Status Atual (2026-04-17)
+## Status Atual (2026-04-27)
 
-- Fase 1 concluida parcialmente: nucleo extraido para biblioteca compartilhada em src/lib.rs e CLI refatorada para usar o core.
-- Fase 2 concluida (MVP): app desktop inicial criado em src/bin/cofre_desktop.rs com fluxo bloqueado/desbloqueado.
-- Fase 3 iniciada parcialmente: desktop ja consegue desbloquear cofre e listar entradas.
-- Fase 4 iniciada parcialmente: desktop com CRUD basico (adicionar/atualizar/remover) e persistencia no vault.
-- Tela inicial em implementacao: primeira abertura agora separa onboarding de primeiro acesso e login por cofre existente.
-- UX do onboarding/login refinada parcialmente: mensagens de ajuda em contexto, navegacao entre telas e erros orientados a acao.
-- Recurso de produtividade adicionado: botao Copiar senha em cada card da listagem (servico, usuario e url), com feedback visual de copia.
-- Fase A da integracao com extensao iniciada: API local minima criada em src/bin/cofre_api.rs com unlock, listagem de entradas, leitura de senha por id e lock de sessao.
-- Migracao de UI iniciada com scaffold Tauri em ui-tauri/ (frontend Vite + backend Rust com comandos health/unlock/list/copy/lock).
-- Proximos passos imediatos: reforcar seguranca da API local (auth por header, whitelist de origem e rate limit), depois iniciar scaffold da extensao.
+- Core compartilhado em `src/lib.rs` com criptografia, persistencia e operacoes de vault.
+- CLI funcional em `src/main.rs` usando o core compartilhado.
+- API local funcional em `src/bin/cofre_api.rs` com unlock, sessoes temporarias, listagem, criacao, edicao, remocao e leitura de senha/notas por id.
+- Interface Tauri removida do repositorio.
+- Estrategia atual: manter Rust como backend local e base de integracao para extensoes e outras interfaces.
 
-Recomendacao: usar egui/eframe (Rust puro) para a primeira versao desktop Windows, reaproveitando a logica de cofre existente. Essa abordagem minimiza superficie de ataque para um app de senhas, simplifica distribuicao (exe unico) e acelera entrega do MVP.
+Recomendacao: concentrar a evolucao imediata na API local, endurecendo seguranca e melhorando a superficie de integracao antes de introduzir outra camada de UI.
 
 **Steps**
-1. Fase 1 - Extrair nucleo de dominio/criptografia para biblioteca reutilizavel (cofre_core), mantendo a CLI como cliente do core. Isso reduz risco de regressao e prepara base para UI.  
-2. Fase 2 - Criar app desktop (cofre_desktop) com egui/eframe e fluxo inicial de telas: bloqueado/desbloqueado (*depends on 1*).  
-3. Fase 3 - Integrar leitura/escrita do vault no desktop: unlock, listagem, detalhe de item, tratamento de erro de senha invalida (*depends on 2*).  
-4. Fase 4 - Implementar CRUD completo na UI (adicionar/editar/remover), com confirmacoes e estados de loading/erro (*depends on 3*).  
-5. Fase 5 - Endurecimento de seguranca: limpar buffers sensiveis em memoria, evitar logs de segredo, mascarar senha por padrao, limpar clipboard automaticamente (*depends on 3; parallel with 4 parcialmente*).  
-6. Fase 6 - Empacotamento Windows (build release, instalador opcional), smoke tests em maquina limpa, checklist de release (*depends on 4 and 5*).
+1. Endurecer a API local: autenticacao entre cliente e servico, whitelist de origem e protecao contra abuso.
+2. Melhorar manejo de segredos em memoria: reduzir tempo de residencia, evitar logs sensiveis e revisar ciclo de vida da senha mestra em sessao.
+3. Adicionar ergonomia de cliente: limpar clipboard automaticamente e melhorar mensagens de erro e status.
+4. Consolidar empacotamento Windows da API com instalacao, atualizacao e desinstalacao previsiveis.
+5. Evoluir integracao com extensao ou outra interface consumindo a API local.
 
 **Relevant files**
-- c:/projetos-rust/cofreSenhaRust/src/main.rs - fonte atual do fluxo CLI; deve virar cliente fino do core.
-- c:/projetos-rust/cofreSenhaRust/Cargo.toml - pode evoluir para workspace e separar crates.
-- c:/projetos-rust/cofreSenhaRust/crates/cofre_core/src/lib.rs - novo core (planejado).
-- c:/projetos-rust/cofreSenhaRust/crates/cofre_desktop/src/main.rs - app desktop (planejado).
+- `src/lib.rs` - core de dominio, criptografia e persistencia.
+- `src/main.rs` - CLI de manutencao.
+- `src/bin/cofre_api.rs` - backend local HTTP para integracoes.
+- `scripts/windows` e `installer/windows` - instalacao e empacotamento da API.
 
 **Verification**
-1. Validar regressao da CLI apos refactor do core (init/add/list/get/remove).
-2. Testar unlock com senha correta/incorreta na UI.
-3. Testar CRUD completo e persistencia no arquivo de vault.
-4. Verificar que senha nao aparece em logs nem mensagens de erro.
-5. Testar limpeza de clipboard apos timeout e comportamento de mascaramento.
-6. Rodar build release e smoke test de instalacao/execucao em Windows limpo.
+1. Validar regressao da CLI apos qualquer refactor do core.
+2. Testar unlock, expiracao de sessao, CRUD e leitura de senha/notas pela API.
+3. Verificar que segredos nao aparecem em logs nem mensagens de erro.
+4. Rodar build release e smoke test de instalacao/execucao em Windows limpo.
 
 **Decisions**
-- Incluido agora: recomendacao de stack, arquitetura em camadas e plano de migracao para desktop.
-- Fora de escopo imediato: autologin em navegador/extensao (ficara para fase posterior).
-- Decisao tecnica: priorizar seguranca e simplicidade de manutencao sobre UI web mais sofisticada.
-
-**Further Considerations**
-1. Opcional recomendado: guardar apenas metadata no keyring do Windows no MVP e deixar auto-unlock completo para etapa seguinte.
-2. Se a prioridade mudar para UI mais rica, alternativa secundaria: Tauri mantendo cofre_core em Rust e API minima para frontend.
+- Tauri foi removido do repositorio.
+- Rust permanece como core, CLI e backend API local.
+- Novas interfaces devem consumir a API local ou reutilizar o core sem reintroduzir Tauri por enquanto.
