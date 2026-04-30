@@ -93,10 +93,10 @@ if (-not (Test-Path $issFile)) {
 Push-Location $repoRoot
 
 try {
-    Write-Host "Compilando cofre_api em release..."
-    cargo build --release --bin cofre_api
+    Write-Host "Compilando cofre_api e cofre_tray em release..."
+    cargo build --release --bin cofre_api --bin cofre_tray
     if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao compilar cofre_api."
+        throw "Falha ao compilar cofre_api ou cofre_tray."
     }
 
     $iscc = Resolve-IsccPath -ExplicitPath $IsccPath

@@ -66,7 +66,7 @@ cargo run --bin cofre_desktop
 
 ### Instalar API para iniciar com o Windows
 
-Opcao mais simples:
+Opcao simples para instalar a partir do codigo-fonte:
 
 - Execute `scripts\\windows\\install_cofre_api.cmd`.
 
@@ -77,10 +77,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install_cofre_api.ps1
 ```
 
 O script:
-- compila `cofre_api` em modo release,
-- copia o executavel para `%LOCALAPPDATA%\CofreSenhaRust\api`,
-- cria ou atualiza a tarefa agendada `CofreApi`,
-- configura inicio automatico no logon e reinicio automatico em falhas.
+- compila `cofre_api` e `cofre_tray` em modo release,
+- copia os executaveis para `%LOCALAPPDATA%\CofreSenhaRust\api`,
+- registra `cofre_tray.exe` para iniciar automaticamente no logon,
+- inicia o tray app em segundo plano, salvo se `-DoNotStartNow` for usado.
 
 Parametros uteis:
 
@@ -105,18 +105,23 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\uninstall_cofre_api.p
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\build_setup.ps1 -Version 0.1.0
 ```
 
-O setup sera gerado em `dist\windows`.
+O setup sera gerado em:
+
+`dist\windows\CofreSenhaRustApi-Setup-0.1.0.exe`
+
+Para instalar, execute o `.exe` gerado. O instalador:
+- instala `cofre_api.exe` e `cofre_tray.exe` em `%LOCALAPPDATA%\CofreSenhaRust\api`,
+- registra `cofre_tray.exe` em `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`,
+- inicia o tray app ao final da instalacao,
+- remove tarefas agendadas antigas chamadas `CofreApi`, se existirem.
 
 Arquivos usados no empacotamento:
 - `installer\windows\cofre_api.iss`
-- `installer\windows\register_task.ps1`
-- `installer\windows\unregister_task.ps1`
 
 Comportamento do instalador:
-- instala `cofre_api.exe` em `%LOCALAPPDATA%\CofreSenhaRust\api`,
-- registra inicializacao automatica da API no logon,
-- inicia a API apos a instalacao,
-- remove a tarefa automatica na desinstalacao.
+- o tray app inicia a API automaticamente quando abre,
+- o tray app permite iniciar/parar/reiniciar a API pela bandeja do sistema,
+- na desinstalacao, o instalador remove o autostart e encerra `cofre_tray.exe`/`cofre_api.exe` se estiverem rodando.
 
 ## Endpoints iniciais
 

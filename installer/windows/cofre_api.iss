@@ -1,5 +1,6 @@
 #define MyAppName "CofreSenhaRust API"
 #define MyAppExeName "cofre_api.exe"
+#define MyTrayExeName "cofre_tray.exe"
 
 #ifndef MyAppVersion
   #define MyAppVersion "0.1.0"
@@ -33,11 +34,16 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
 Source: "..\..\target\release\cofre_api.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "register_task.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\target\release\cofre_tray.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "unregister_task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#TaskName}"; ValueData: """{app}\{#MyTrayExeName}"""; Flags: uninsdeletevalue
+
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register_task.ps1"" -ExePath ""{app}\cofre_api.exe"" -TaskName ""{#TaskName}"" -Port {#ApiPort} -SessionTtlSecs {#SessionTtlSecs}"; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\unregister_task.ps1"" -TaskName ""{#TaskName}"""; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyTrayExeName}"; Flags: runhidden nowait
 
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\unregister_task.ps1"" -TaskName ""{#TaskName}"""; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterCofreApiTask"
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Stop-Process -Name cofre_tray,cofre_api -Force -ErrorAction SilentlyContinue"""; Flags: runhidden waituntilterminated; RunOnceId: "StopCofreApiTray"

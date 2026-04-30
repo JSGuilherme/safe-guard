@@ -6,18 +6,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($task) {
-    try {
-        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    } catch {
-        # Ignora erro ao parar tarefa inexistente/em transicao.
-    }
 
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Write-Host "Tarefa removida: $TaskName"
-} else {
-    Write-Host "Tarefa nao encontrada: $TaskName"
+# Remove tray app from autostart
+$runRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+if (Test-Path $runRegistryPath) {
+    if (Get-ItemProperty -Path $runRegistryPath -Name $TaskName -ErrorAction SilentlyContinue) {
+        Remove-ItemProperty -Path $runRegistryPath -Name $TaskName
+        Write-Host "Autostart removido: $TaskName"
+    } else {
+        Write-Host "Autostart nao encontrado: $TaskName"
+    }
 }
 
 if (-not $KeepBinary) {

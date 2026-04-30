@@ -19,25 +19,22 @@ function Assert-CommandExists {
 
 function Get-RepoRoot {
     if ($PSScriptRoot) {
-        return (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
+        return (Resolve-Path (Join-Path $PSScriptRoot "..\..\")).Path
     }
-
     return (Get-Location).Path
 }
 
+
+# Register tray app for autostart
 function Register-OrUpdateStartupEntry {
     param(
         [string]$Name,
-        [string]$ExePath,
-        [int]$ApiPort,
-        [int]$Ttl
+        [string]$TrayExePath
     )
-
     if (-not (Test-Path $runRegistryPath)) {
         New-Item -Path $runRegistryPath -Force | Out-Null
     }
-
-    $value = ('"{0}" --port {1} --session-ttl-secs {2}' -f $ExePath, $ApiPort, $Ttl)
+    $value = '"' + $TrayExePath + '"'
     Set-ItemProperty -Path $runRegistryPath -Name $Name -Value $value -Type String
 }
 
@@ -67,37 +64,37 @@ $repoRoot = Get-RepoRoot
 Push-Location $repoRoot
 
 try {
-    Write-Host "Compilando cofre_api em modo release..."
-    cargo build --release --bin cofre_api
+    Write-Host "Compilando cofre_api e cofre_tray em modo release..."
+    cargo build --release --bin cofre_api --bin cofre_tray
     if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao compilar cofre_api."
+        throw "Falha ao compilar cofre_api ou cofre_tray."
     }
 
-    $builtExe = Join-Path $repoRoot "target\release\cofre_api.exe"
-    if (-not (Test-Path $builtExe)) {
-        throw "Binario nao encontrado em $builtExe"
+    $builtApiExe = Join-Path $repoRoot "target\release\cofre_api.exe"
+    $builtTrayExe = Join-Path $repoRoot "target\release\cofre_tray.exe"
+    if (-not (Test-Path $builtApiExe)) {
+        throw "Binario nao encontrado em $builtApiExe"
+    }
+    if (-not (Test-Path $builtTrayExe)) {
+        throw "Binario nao encontrado em $builtTrayExe"
     }
 
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-    $installedExe = Join-Path $InstallDir "cofre_api.exe"
-    Copy-Item -Path $builtExe -Destination $installedExe -Force
+    $installedApiExe = Join-Path $InstallDir "cofre_api.exe"
+    $installedTrayExe = Join-Path $InstallDir "cofre_tray.exe"
+    Copy-Item -Path $builtApiExe -Destination $installedApiExe -Force
+    Copy-Item -Path $builtTrayExe -Destination $installedTrayExe -Force
 
-    Register-OrUpdateStartupEntry -Name $TaskName -ExePath $installedExe -ApiPort $Port -Ttl $SessionTtlSecs
+    Register-OrUpdateStartupEntry -Name $TaskName -TrayExePath $installedTrayExe
 
     if (-not $DoNotStartNow) {
-        Write-Host "Iniciando API em segundo plano..."
-        Start-Process -FilePath $installedExe -ArgumentList "--port $Port --session-ttl-secs $SessionTtlSecs" -WindowStyle Hidden
-
-        $healthUrl = "http://127.0.0.1:$Port/api/v1/health"
-        if (Wait-ForHealth -Url $healthUrl) {
-            Write-Host "API ativa em $healthUrl"
-        } else {
-            Write-Warning "Startup configurado, mas o healthcheck nao respondeu ainda."
-        }
+        Write-Host "Iniciando tray app em segundo plano..."
+        Start-Process -FilePath $installedTrayExe -WindowStyle Hidden
     }
 
     Write-Host "Instalacao concluida."
-    Write-Host "- Binario: $installedExe"
+    Write-Host "- Binario API: $installedApiExe"
+    Write-Host "- Binario Tray: $installedTrayExe"
     Write-Host "- Entrada de inicializacao: $TaskName"
     Write-Host "- Inicializacao automatica: Ativa na lista de Aplicativos de Inicializacao do Windows"
 }
