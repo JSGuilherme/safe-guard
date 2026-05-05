@@ -1,4 +1,7 @@
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -15,6 +18,9 @@ use cofreSenhaRust::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+const DEFAULT_SESSION_IDLE_TTL_SECS: u64 = 1800;
+const DEFAULT_SESSION_MAX_TTL_SECS: u64 = 43_200;
+
 #[derive(Parser, Debug)]
 #[command(name = "cofre-api")]
 #[command(about = "API local para integracao com extensao do navegador")]
@@ -22,20 +28,32 @@ struct ApiArgs {
     #[arg(long, default_value_t = 5474)]
     port: u16,
 
-    #[arg(long, default_value_t = 1800)]
+    #[arg(long, default_value_t = DEFAULT_SESSION_IDLE_TTL_SECS)]
     session_ttl_secs: u64,
+
+    #[arg(long, default_value_t = DEFAULT_SESSION_MAX_TTL_SECS)]
+    session_max_ttl_secs: u64,
 }
 
 #[derive(Clone)]
 struct AppState {
     sessions: Arc<Mutex<HashMap<String, SessionState>>>,
     session_ttl_secs: u64,
+    session_max_ttl_secs: u64,
 }
 
 #[derive(Debug, Clone)]
 struct SessionState {
     master_password: String,
     expires_at_unix: u64,
+    max_expires_at_unix: u64,
+}
+
+#[derive(Debug)]
+struct RefreshedSession {
+    master_password: String,
+    expires_at_unix: u64,
+    max_expires_at_unix: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -63,7 +81,17 @@ struct CreateVaultRequest {
 struct UnlockResponse {
     session_token: String,
     expires_at_unix: u64,
+    max_expires_at_unix: u64,
     ttl_secs: u64,
+    max_ttl_secs: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionRefreshResponse {
+    expires_at_unix: u64,
+    max_expires_at_unix: u64,
+    ttl_secs: u64,
+    max_ttl_secs: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -133,12 +161,14 @@ async fn run() -> Result<(), String> {
     let shared = AppState {
         sessions: Arc::new(Mutex::new(HashMap::new())),
         session_ttl_secs: args.session_ttl_secs,
+        session_max_ttl_secs: args.session_max_ttl_secs,
     };
 
     let app = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/vault", get(vault_status).post(create_vault))
         .route("/api/v1/unlock", post(unlock))
+        .route("/api/v1/session/{session_token}/touch", post(touch_session))
         .route("/api/v1/entries/{session_token}", get(list_entries))
         .route("/api/v1/entries/{session_token}", post(create_entry))
         .route(
@@ -233,6 +263,19 @@ async fn unlock(
     Ok(Json(session))
 }
 
+async fn touch_session(
+    State(state): State<AppState>,
+    Path(session_token): Path<String>,
+) -> Result<Json<SessionRefreshResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let session = refresh_session_access(&state, session_token.as_str())?;
+    Ok(Json(SessionRefreshResponse {
+        expires_at_unix: session.expires_at_unix,
+        max_expires_at_unix: session.max_expires_at_unix,
+        ttl_secs: state.session_ttl_secs,
+        max_ttl_secs: state.session_max_ttl_secs,
+    }))
+}
+
 async fn list_entries(
     State(state): State<AppState>,
     Path(session_token): Path<String>,
@@ -269,7 +312,8 @@ async fn create_entry(
         return Err(err_bad_request("Senha nao informada"));
     }
 
-    let (master_password, mut vault) = read_vault_and_master_for_session(&state, session_token.as_str())?;
+    let (master_password, mut vault) =
+        read_vault_and_master_for_session(&state, session_token.as_str())?;
     let was_update = upsert_entry(
         &mut vault,
         NewEntry {
@@ -289,7 +333,11 @@ async fn create_entry(
         .find(|item| item.servico == payload.servico.trim())
         .ok_or_else(|| err_internal("Falha ao localizar entrada salva".to_string()))?;
 
-    let status = if was_update { StatusCode::OK } else { StatusCode::CREATED };
+    let status = if was_update {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
     Ok((
         status,
         Json(EntryUpsertResponse {
@@ -338,7 +386,8 @@ async fn edit_entry(
     Path((session_token, entry_id)): Path<(String, String)>,
     Json(payload): Json<EntryEditRequest>,
 ) -> Result<Json<EntryUpsertResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let (master_password, mut vault) = read_vault_and_master_for_session(&state, session_token.as_str())?;
+    let (master_password, mut vault) =
+        read_vault_and_master_for_session(&state, session_token.as_str())?;
 
     let entry = vault
         .entries
@@ -385,10 +434,13 @@ async fn delete_entry(
     State(state): State<AppState>,
     Path((session_token, entry_id)): Path<(String, String)>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let (master_password, mut vault) = read_vault_and_master_for_session(&state, session_token.as_str())?;
+    let (master_password, mut vault) =
+        read_vault_and_master_for_session(&state, session_token.as_str())?;
 
     let before = vault.entries.len();
-    vault.entries.retain(|entry| entry.id.to_string() != entry_id);
+    vault
+        .entries
+        .retain(|entry| entry.id.to_string() != entry_id);
 
     if vault.entries.len() == before {
         return Err(err_not_found("Entrada nao encontrada"));
@@ -418,21 +470,39 @@ fn resolve_session_master_password(
     state: &AppState,
     session_token: &str,
 ) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    Ok(refresh_session_access(state, session_token)?.master_password)
+}
+
+fn refresh_session_access(
+    state: &AppState,
+    session_token: &str,
+) -> Result<RefreshedSession, (StatusCode, Json<ErrorResponse>)> {
     let mut guard = state
         .sessions
         .lock()
         .map_err(|_| err_internal("Falha de sincronizacao de sessao".to_string()))?;
 
-    let Some(session) = guard.get(session_token) else {
+    let now = now_unix();
+    let Some(session) = guard.get_mut(session_token) else {
         return Err(err_unauthorized("Sessao invalida"));
     };
 
-    if is_expired(session.expires_at_unix) {
+    if is_expired_at(now, session.expires_at_unix)
+        || is_expired_at(now, session.max_expires_at_unix)
+    {
         guard.remove(session_token);
         return Err(err_unauthorized("Sessao expirada"));
     }
 
-    Ok(session.master_password.clone())
+    let master_password = session.master_password.clone();
+    session.expires_at_unix =
+        refreshed_expires_at_unix(now, state.session_ttl_secs, session.max_expires_at_unix);
+
+    Ok(RefreshedSession {
+        master_password,
+        expires_at_unix: session.expires_at_unix,
+        max_expires_at_unix: session.max_expires_at_unix,
+    })
 }
 
 fn create_session_for_master(
@@ -440,7 +510,10 @@ fn create_session_for_master(
     master_password: String,
 ) -> Result<UnlockResponse, (StatusCode, Json<ErrorResponse>)> {
     let token = format!("{}{}", Uuid::new_v4(), Uuid::new_v4());
-    let expires_at_unix = now_unix().saturating_add(state.session_ttl_secs);
+    let created_at_unix = now_unix();
+    let max_expires_at_unix = created_at_unix.saturating_add(state.session_max_ttl_secs);
+    let expires_at_unix =
+        refreshed_expires_at_unix(created_at_unix, state.session_ttl_secs, max_expires_at_unix);
 
     let mut guard = state
         .sessions
@@ -452,13 +525,16 @@ fn create_session_for_master(
         SessionState {
             master_password,
             expires_at_unix,
+            max_expires_at_unix,
         },
     );
 
     Ok(UnlockResponse {
         session_token: token,
         expires_at_unix,
+        max_expires_at_unix,
         ttl_secs: state.session_ttl_secs,
+        max_ttl_secs: state.session_max_ttl_secs,
     })
 }
 
@@ -519,8 +595,12 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
     })
 }
 
-fn is_expired(expires_at_unix: u64) -> bool {
-    now_unix() >= expires_at_unix
+fn refreshed_expires_at_unix(now: u64, idle_ttl_secs: u64, max_expires_at_unix: u64) -> u64 {
+    now.saturating_add(idle_ttl_secs).min(max_expires_at_unix)
+}
+
+fn is_expired_at(now: u64, expires_at_unix: u64) -> bool {
+    now >= expires_at_unix
 }
 
 fn now_unix() -> u64 {

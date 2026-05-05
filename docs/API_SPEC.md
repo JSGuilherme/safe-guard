@@ -6,6 +6,14 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 
 - http://127.0.0.1:5474
 
+## Sessao
+
+- `ttl_secs` e o timeout de inatividade da sessao. Padrao: `1800` segundos, 30 minutos.
+- `max_ttl_secs` e a vida maxima absoluta da sessao. Padrao: `43200` segundos, 12 horas.
+- `expires_at_unix` e renovado a cada chamada autenticada bem-sucedida, limitado por `max_expires_at_unix`.
+- Quando `expires_at_unix` ou `max_expires_at_unix` passam, a sessao e removida e a API retorna `401`.
+- `POST /api/v1/lock/{session_token}` remove a sessao imediatamente.
+
 ## Endpoints
 
 ### 1. Health
@@ -39,7 +47,9 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 {
   "session_token": "token-gerado",
   "expires_at_unix": 1763383800,
-  "ttl_secs": 1800
+  "max_expires_at_unix": 1763425200,
+  "ttl_secs": 1800,
+  "max_ttl_secs": 43200
 }
 ```
 
@@ -48,7 +58,26 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 - 401: senha incorreta/cofre invalido
 - 404: cofre nao encontrado
 
-### 3. Status do Cofre
+### 3. Renovar Atividade da Sessao
+
+- Metodo: POST
+- Rota: /api/v1/session/{session_token}/touch
+- Resposta 200:
+
+```json
+{
+  "expires_at_unix": 1763384700,
+  "max_expires_at_unix": 1763425200,
+  "ttl_secs": 1800,
+  "max_ttl_secs": 43200
+}
+```
+
+- Uso esperado: manter a sessao ativa quando a UI estiver em uso e obter o novo prazo de inatividade.
+- Erros:
+- 401: sessao invalida ou expirada
+
+### 4. Status do Cofre
 
 - Metodo: GET
 - Rota: /api/v1/vault
@@ -60,7 +89,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 }
 ```
 
-### 4. Criar Cofre
+### 5. Criar Cofre
 
 - Metodo: POST
 - Rota: /api/v1/vault
@@ -78,7 +107,9 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 {
   "session_token": "token-gerado",
   "expires_at_unix": 1763383800,
-  "ttl_secs": 1800
+  "max_expires_at_unix": 1763425200,
+  "ttl_secs": 1800,
+  "max_ttl_secs": 43200
 }
 ```
 
@@ -86,7 +117,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 - 400: senha mestra invalida
 - 409: cofre ja existe
 
-### 5. Listagem de Entradas
+### 6. Listagem de Entradas
 
 - Metodo: GET
 - Rota: /api/v1/entries/{session_token}
@@ -109,7 +140,9 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 - Erros:
 - 401: sessao invalida ou expirada
 
-### 6. Cadastrar Chave
+Observacao: chamada autenticada bem-sucedida renova `expires_at_unix`, mas esta resposta nao retorna o novo prazo. Use `/api/v1/session/{session_token}/touch` quando a UI precisar sincronizar o contador.
+
+### 7. Cadastrar Chave
 
 - Metodo: POST
 - Rota: /api/v1/entries/{session_token}
@@ -140,7 +173,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 - 400: servico, usuario ou senha ausentes
 - 401: sessao invalida ou expirada
 
-### 7. Editar Chave por ID
+### 8. Editar Chave por ID
 
 - Metodo: PUT
 - Rota: /api/v1/entries/{session_token}/{entry_id}
@@ -169,7 +202,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 - 401: sessao invalida ou expirada
 - 404: entrada nao encontrada
 
-### 8. Excluir Chave
+### 9. Excluir Chave
 
 - Metodo: DELETE
 - Rota: /api/v1/entries/{session_token}/{entry_id}
@@ -179,7 +212,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 - 401: sessao invalida ou expirada
 - 404: entrada nao encontrada
 
-### 9. Obter Senha por ID
+### 10. Obter Senha por ID
 
 - Metodo: GET
 - Rota: /api/v1/entries/{session_token}/{entry_id}/password
@@ -195,7 +228,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 - 401: sessao invalida ou expirada
 - 404: entrada nao encontrada
 
-### 10. Obter Notas por ID
+### 11. Obter Notas por ID
 
 - Metodo: GET
 - Rota: /api/v1/entries/{session_token}/{entry_id}/notes
@@ -213,7 +246,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 - 401: sessao invalida ou expirada
 - 404: entrada nao encontrada
 
-### 11. Lock da Sessao
+### 12. Lock da Sessao
 
 - Metodo: POST
 - Rota: /api/v1/lock/{session_token}
@@ -224,13 +257,12 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 
 ## Estado atual de seguranca
 
-- Implementado: sessao com TTL configuravel e invalidacao por expiracao.
+- Implementado: sessao com timeout de inatividade configuravel, vida maxima absoluta, renovacao em atividade autenticada e invalidacao manual.
 - Pendente: autenticacao por header (Bearer), assinatura de request e whitelist de origem.
 - Pendente: rate limit e auditoria local de acesso.
 
 ## Roadmap imediato da API
 
 1. Migrar token de rota para header Authorization: Bearer.
-2. Adicionar endpoint para atualizar atividade da sessao sem novo unlock.
-3. Padronizar codigos de erro e schema de resposta de falha.
-4. Adicionar testes de integracao dos fluxos principais.
+2. Padronizar codigos de erro e schema de resposta de falha.
+3. Adicionar testes de integracao dos fluxos principais.

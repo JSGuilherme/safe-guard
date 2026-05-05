@@ -1,0 +1,339 @@
+{
+  "info": {
+    "name": "CofreSenhaRust API Local v1",
+    "description": "Postman collection for testing the local CofreSenhaRust API session flow, vault operations, entry CRUD, idle refresh, and manual lock.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:5474",
+      "type": "string"
+    },
+    {
+      "key": "master_password",
+      "value": "change-this-master-password",
+      "type": "string"
+    },
+    {
+      "key": "session_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "entry_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/health",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "health"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"health is ok\", function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql(\"ok\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Vault Status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/vault",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "vault"]
+        }
+      }
+    },
+    {
+      "name": "Create Vault",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"master_password\": \"{{master_password}}\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/vault",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "vault"]
+        },
+        "description": "Use only on a machine/profile that does not already have a vault. Existing vaults return 409."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.collectionVariables.set(\"session_token\", body.session_token);",
+              "  pm.collectionVariables.set(\"expires_at_unix\", body.expires_at_unix);",
+              "  pm.collectionVariables.set(\"max_expires_at_unix\", body.max_expires_at_unix);",
+              "}",
+              "pm.test(\"created or already exists\", function () {",
+              "  pm.expect([201, 409]).to.include(pm.response.code);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Unlock",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"master_password\": \"{{master_password}}\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/unlock",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "unlock"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"unlock returns session\", function () {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.session_token).to.be.a(\"string\").and.not.empty;",
+              "  pm.expect(body.ttl_secs).to.eql(1800);",
+              "  pm.expect(body.max_ttl_secs).to.eql(43200);",
+              "  pm.collectionVariables.set(\"session_token\", body.session_token);",
+              "  pm.collectionVariables.set(\"expires_at_unix\", body.expires_at_unix);",
+              "  pm.collectionVariables.set(\"max_expires_at_unix\", body.max_expires_at_unix);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Touch Session",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/session/{{session_token}}/touch",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "session", "{{session_token}}", "touch"]
+        },
+        "description": "Refreshes the idle timeout and returns the updated expires_at_unix without reading entries."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"touch refreshes idle deadline\", function () {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.expires_at_unix).to.be.a(\"number\");",
+              "  pm.expect(body.max_expires_at_unix).to.be.a(\"number\");",
+              "  pm.expect(body.expires_at_unix).to.be.at.most(body.max_expires_at_unix);",
+              "  pm.collectionVariables.set(\"expires_at_unix\", body.expires_at_unix);",
+              "  pm.collectionVariables.set(\"max_expires_at_unix\", body.max_expires_at_unix);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List Entries",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/entries/{{session_token}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "entries", "{{session_token}}"]
+        }
+      }
+    },
+    {
+      "name": "Create Or Update Entry",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"servico\": \"postman-test\",\n  \"usuario\": \"postman-user@example.com\",\n  \"senha\": \"postman-secret-123\",\n  \"url\": \"https://example.com/login\",\n  \"notas\": \"created from Postman\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/entries/{{session_token}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "entries", "{{session_token}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"entry saved\", function () {",
+              "  pm.expect([200, 201]).to.include(pm.response.code);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.entry_id).to.be.a(\"string\").and.not.empty;",
+              "  pm.collectionVariables.set(\"entry_id\", body.entry_id);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Entry Password",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/entries/{{session_token}}/{{entry_id}}/password",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "entries", "{{session_token}}", "{{entry_id}}", "password"]
+        }
+      }
+    },
+    {
+      "name": "Get Entry Notes",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/entries/{{session_token}}/{{entry_id}}/notes",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "entries", "{{session_token}}", "{{entry_id}}", "notes"]
+        }
+      }
+    },
+    {
+      "name": "Edit Entry",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notas\": \"updated from Postman touch/idle session test\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/entries/{{session_token}}/{{entry_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "entries", "{{session_token}}", "{{entry_id}}"]
+        }
+      }
+    },
+    {
+      "name": "Delete Entry",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/entries/{{session_token}}/{{entry_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "entries", "{{session_token}}", "{{entry_id}}"]
+        }
+      }
+    },
+    {
+      "name": "Lock Session",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/lock/{{session_token}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "lock", "{{session_token}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"session locked\", function () {",
+              "  pm.response.to.have.status(204);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List Entries After Lock Should Fail",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/entries/{{session_token}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "entries", "{{session_token}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"locked session is rejected\", function () {",
+              "  pm.response.to.have.status(401);",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -2,6 +2,7 @@ param(
     [string]$Version = "0.1.0",
     [int]$Port = 5474,
     [int]$SessionTtlSecs = 1800,
+    [int]$SessionMaxTtlSecs = 43200,
     [string]$TaskName = "CofreApi",
     [string]$IsccPath = ""
 )
@@ -102,7 +103,7 @@ try {
     $iscc = Resolve-IsccPath -ExplicitPath $IsccPath
     Write-Host "Usando ISCC: $iscc"
 
-    & $iscc "/DMyAppVersion=$Version" "/DApiPort=$Port" "/DSessionTtlSecs=$SessionTtlSecs" "/DTaskName=$TaskName" $issFile
+    & $iscc "/DMyAppVersion=$Version" "/DApiPort=$Port" "/DSessionTtlSecs=$SessionTtlSecs" "/DSessionMaxTtlSecs=$SessionMaxTtlSecs" "/DTaskName=$TaskName" $issFile
     if ($LASTEXITCODE -ne 0) {
         throw "Falha ao gerar setup.exe com Inno Setup."
     }

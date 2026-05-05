@@ -1,4 +1,7 @@
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 //! Tray app to manage cofre_api.exe as a background process.
 
@@ -10,7 +13,14 @@ use std::thread;
 use std::time::Duration;
 use tray_item::TrayItem;
 
-const API_ARGS: &[&str] = &["--port", "5474", "--session-ttl-secs", "1800"];
+const API_ARGS: &[&str] = &[
+    "--port",
+    "5474",
+    "--session-ttl-secs",
+    "1800",
+    "--session-max-ttl-secs",
+    "43200",
+];
 const ICON_RESOURCE: &str = "COFRE_TRAY";
 
 fn main() {

@@ -3,7 +3,8 @@ param(
     [string]$ExePath,
     [string]$TaskName = "CofreApi",
     [int]$Port = 5474,
-    [int]$SessionTtlSecs = 1800
+    [int]$SessionTtlSecs = 1800,
+    [int]$SessionMaxTtlSecs = 43200
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,7 +13,7 @@ if (-not (Test-Path $ExePath)) {
     throw "Executavel nao encontrado: $ExePath"
 }
 
-$action = New-ScheduledTaskAction -Execute $ExePath -Argument "--port $Port --session-ttl-secs $SessionTtlSecs"
+$action = New-ScheduledTaskAction -Execute $ExePath -Argument "--port $Port --session-ttl-secs $SessionTtlSecs --session-max-ttl-secs $SessionMaxTtlSecs"
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
 

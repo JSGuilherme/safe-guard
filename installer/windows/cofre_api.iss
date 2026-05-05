@@ -14,6 +14,10 @@
   #define SessionTtlSecs "1800"
 #endif
 
+#ifndef SessionMaxTtlSecs
+  #define SessionMaxTtlSecs "43200"
+#endif
+
 #ifndef TaskName
   #define TaskName "CofreApi"
 #endif

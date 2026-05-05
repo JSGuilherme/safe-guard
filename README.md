@@ -55,8 +55,14 @@ cargo run --bin cofre_api
 Com parametros opcionais:
 
 ```bash
-cargo run --bin cofre_api -- --port 5474 --session-ttl-secs 1800
+cargo run --bin cofre_api -- --port 5474 --session-ttl-secs 1800 --session-max-ttl-secs 43200
 ```
+
+Sessao da API:
+- `--session-ttl-secs`: timeout de inatividade. Padrao: `1800` segundos, 30 minutos.
+- `--session-max-ttl-secs`: vida maxima absoluta da sessao. Padrao: `43200` segundos, 12 horas.
+- Cada chamada autenticada valida a sessao e renova `expires_at_unix` ate o limite de `max_expires_at_unix`.
+- `POST /api/v1/lock/{session_token}` invalida a sessao imediatamente.
 
 ### Iniciar a interface desktop Rust existente
 
@@ -129,6 +135,7 @@ Comportamento do instalador:
 - `GET /api/v1/vault`
 - `POST /api/v1/vault`
 - `POST /api/v1/unlock`
+- `POST /api/v1/session/{session_token}/touch`
 - `GET /api/v1/entries/{session_token}`
 - `POST /api/v1/entries/{session_token}`
 - `PUT /api/v1/entries/{session_token}/{entry_id}`
@@ -136,6 +143,10 @@ Comportamento do instalador:
 - `GET /api/v1/entries/{session_token}/{entry_id}/password`
 - `GET /api/v1/entries/{session_token}/{entry_id}/notes`
 - `POST /api/v1/lock/{session_token}`
+
+Contrato detalhado da API: `docs\API_SPEC.md`.
+
+Collection para importar no Postman: `docs\cofre_api.postman_collection.json`.
 
 ## Onde o cofre fica salvo
 
