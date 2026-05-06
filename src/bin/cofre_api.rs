@@ -18,7 +18,7 @@ use cofreSenhaRust::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const DEFAULT_SESSION_IDLE_TTL_SECS: u64 = 1800;
+const DEFAULT_SESSION_IDLE_TTL_SECS: u64 = 7200;
 const DEFAULT_SESSION_MAX_TTL_SECS: u64 = 43_200;
 
 #[derive(Parser, Debug)]
@@ -73,6 +73,12 @@ struct UnlockRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct ChangeMasterPasswordRequest {
+    new_master_password: String,
+    confirm_new_master_password: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct CreateVaultRequest {
     master_password: String,
 }
@@ -92,6 +98,16 @@ struct SessionRefreshResponse {
     max_expires_at_unix: u64,
     ttl_secs: u64,
     max_ttl_secs: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct ChangeMasterPasswordResponse {
+    session_token: String,
+    expires_at_unix: u64,
+    max_expires_at_unix: u64,
+    ttl_secs: u64,
+    max_ttl_secs: u64,
+    invalidated_sessions: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -169,6 +185,10 @@ async fn run() -> Result<(), String> {
         .route("/api/v1/vault", get(vault_status).post(create_vault))
         .route("/api/v1/unlock", post(unlock))
         .route("/api/v1/session/{session_token}/touch", post(touch_session))
+        .route(
+            "/api/v1/session/{session_token}/password",
+            put(change_master_password),
+        )
         .route("/api/v1/entries/{session_token}", get(list_entries))
         .route("/api/v1/entries/{session_token}", post(create_entry))
         .route(
@@ -273,6 +293,47 @@ async fn touch_session(
         max_expires_at_unix: session.max_expires_at_unix,
         ttl_secs: state.session_ttl_secs,
         max_ttl_secs: state.session_max_ttl_secs,
+    }))
+}
+
+async fn change_master_password(
+    State(state): State<AppState>,
+    Path(session_token): Path<String>,
+    Json(payload): Json<ChangeMasterPasswordRequest>,
+) -> Result<Json<ChangeMasterPasswordResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if payload.new_master_password.trim().is_empty() {
+        return Err(err_bad_request("Nova senha mestra nao informada"));
+    }
+    if payload.confirm_new_master_password.trim().is_empty() {
+        return Err(err_bad_request("Confirmacao da nova senha mestra nao informada"));
+    }
+    if payload.new_master_password != payload.confirm_new_master_password {
+        return Err(err_bad_request("As novas senhas nao conferem"));
+    }
+
+    if let Err(err) = cofreSenhaRust::validate_master_password(payload.new_master_password.as_str()) {
+        return Err(err_bad_request(&err));
+    }
+
+    let refreshed_session = refresh_session_access(&state, session_token.as_str())?;
+    let vault = read_vault_with_master(refreshed_session.master_password.as_str())?;
+    save_vault_for_session(payload.new_master_password.as_str(), &vault)?;
+
+    let invalidated_sessions = update_session_master_password(
+        &state,
+        session_token.as_str(),
+        payload.new_master_password,
+        refreshed_session.expires_at_unix,
+        refreshed_session.max_expires_at_unix,
+    )?;
+
+    Ok(Json(ChangeMasterPasswordResponse {
+        session_token,
+        expires_at_unix: refreshed_session.expires_at_unix,
+        max_expires_at_unix: refreshed_session.max_expires_at_unix,
+        ttl_secs: state.session_ttl_secs,
+        max_ttl_secs: state.session_max_ttl_secs,
+        invalidated_sessions,
     }))
 }
 
@@ -536,6 +597,32 @@ fn create_session_for_master(
         ttl_secs: state.session_ttl_secs,
         max_ttl_secs: state.session_max_ttl_secs,
     })
+}
+
+fn update_session_master_password(
+    state: &AppState,
+    session_token: &str,
+    master_password: String,
+    expires_at_unix: u64,
+    max_expires_at_unix: u64,
+) -> Result<usize, (StatusCode, Json<ErrorResponse>)> {
+    let mut guard = state
+        .sessions
+        .lock()
+        .map_err(|_| err_internal("Falha de sincronizacao de sessao".to_string()))?;
+
+    let invalidated_sessions = guard.len().saturating_sub(1);
+    guard.retain(|token, _| token == session_token);
+    guard.insert(
+        session_token.to_string(),
+        SessionState {
+            master_password,
+            expires_at_unix,
+            max_expires_at_unix,
+        },
+    );
+
+    Ok(invalidated_sessions)
 }
 
 fn read_vault_for_session(

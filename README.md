@@ -55,11 +55,11 @@ cargo run --bin cofre_api
 Com parametros opcionais:
 
 ```bash
-cargo run --bin cofre_api -- --port 5474 --session-ttl-secs 1800 --session-max-ttl-secs 43200
+cargo run --bin cofre_api -- --port 5474 --session-ttl-secs 7200 --session-max-ttl-secs 43200
 ```
 
 Sessao da API:
-- `--session-ttl-secs`: timeout de inatividade. Padrao: `1800` segundos, 30 minutos.
+- `--session-ttl-secs`: timeout de inatividade. Padrao: `7200` segundos, 2 horas.
 - `--session-max-ttl-secs`: vida maxima absoluta da sessao. Padrao: `43200` segundos, 12 horas.
 - Cada chamada autenticada valida a sessao e renova `expires_at_unix` ate o limite de `max_expires_at_unix`.
 - `POST /api/v1/lock/{session_token}` invalida a sessao imediatamente.
@@ -91,7 +91,7 @@ O script:
 Parametros uteis:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install_cofre_api.ps1 -Port 5474 -SessionTtlSecs 1800 -TaskName CofreApi
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install_cofre_api.ps1 -Port 5474 -SessionTtlSecs 7200 -TaskName CofreApi
 ```
 
 Desinstalar:
@@ -127,6 +127,7 @@ Arquivos usados no empacotamento:
 Comportamento do instalador:
 - o tray app inicia a API automaticamente quando abre,
 - o tray app permite iniciar/parar/reiniciar a API pela bandeja do sistema,
+- o tray app possui um menu "Abrir Configuração" para editar a porta e timeouts,
 - na desinstalacao, o instalador remove o autostart e encerra `cofre_tray.exe`/`cofre_api.exe` se estiverem rodando.
 
 ## Endpoints iniciais
@@ -136,6 +137,7 @@ Comportamento do instalador:
 - `POST /api/v1/vault`
 - `POST /api/v1/unlock`
 - `POST /api/v1/session/{session_token}/touch`
+- `PUT /api/v1/session/{session_token}/password`
 - `GET /api/v1/entries/{session_token}`
 - `POST /api/v1/entries/{session_token}`
 - `PUT /api/v1/entries/{session_token}/{entry_id}`
@@ -147,6 +149,31 @@ Comportamento do instalador:
 Contrato detalhado da API: `docs\API_SPEC.md`.
 
 Collection para importar no Postman: `docs\cofre_api.postman_collection.json`.
+
+## Configuração da API local
+
+### Via Menu do Tray
+
+Após instalar, o tray app terá um menu "Abrir Configuração" que permite editar:
+- **Porta**: porta em que a API escuta (padrão: 5474)
+- **Timeout de Inatividade**: quantos segundos uma sessão inativa pode durar (padrão: 7200 = 2 horas)
+- **Timeout Máximo**: vida máxima absoluta da sessão (padrão: 43200 = 12 horas)
+
+O arquivo de configuração fica em:
+```
+%LOCALAPPDATA%\CofreSenhaRust\config.json
+```
+
+### Via .env (Desenvolvimento)
+
+Crie um arquivo `.env` na raiz do projeto com variáveis como:
+```
+API_PORT=5474
+SESSION_TTL_SECS=7200
+SESSION_MAX_TTL_SECS=43200
+```
+
+Veja `CONFIG.md` para mais detalhes.
 
 ## Onde o cofre fica salvo
 

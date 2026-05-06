@@ -6,6 +6,7 @@
 //! Tray app to manage cofre_api.exe as a background process.
 
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -13,15 +14,129 @@ use std::thread;
 use std::time::Duration;
 use tray_item::TrayItem;
 
-const API_ARGS: &[&str] = &[
-    "--port",
-    "5474",
-    "--session-ttl-secs",
-    "1800",
-    "--session-max-ttl-secs",
-    "43200",
-];
 const ICON_RESOURCE: &str = "COFRE_TRAY";
+const DEFAULT_API_PORT: &str = "5474";
+const DEFAULT_SESSION_TTL_SECS: &str = "7200";
+const DEFAULT_SESSION_MAX_TTL_SECS: &str = "43200";
+const CONFIG_DIR: &str = "CofreSenhaRust";
+const CONFIG_FILE: &str = "config.json";
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+struct ApiConfig {
+    #[serde(default = "default_api_port")]
+    api_port: String,
+    #[serde(default = "default_session_ttl_secs")]
+    session_ttl_secs: String,
+    #[serde(default = "default_session_max_ttl_secs")]
+    session_max_ttl_secs: String,
+}
+
+fn default_api_port() -> String {
+    DEFAULT_API_PORT.to_string()
+}
+
+fn default_session_ttl_secs() -> String {
+    DEFAULT_SESSION_TTL_SECS.to_string()
+}
+
+fn default_session_max_ttl_secs() -> String {
+    DEFAULT_SESSION_MAX_TTL_SECS.to_string()
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            api_port: default_api_port(),
+            session_ttl_secs: default_session_ttl_secs(),
+            session_max_ttl_secs: default_session_max_ttl_secs(),
+        }
+    }
+}
+
+fn get_config_path() -> Result<PathBuf, String> {
+    let local_app_data = dirs::data_local_dir()
+        .ok_or_else(|| "Nao foi possivel obter pasta local de dados".to_string())?;
+    Ok(local_app_data.join(CONFIG_DIR).join(CONFIG_FILE))
+}
+
+fn load_config() -> ApiConfig {
+    // Tenta carregar do arquivo de configuração primeiro
+    if let Ok(config_path) = get_config_path() {
+        if let Ok(content) = fs::read_to_string(&config_path) {
+            if let Ok(config) = serde_json::from_str::<ApiConfig>(&content) {
+                return config;
+            }
+        }
+    }
+
+    // Fallback: carrega do .env se existir
+    dotenv::dotenv().ok();
+    let mut config = ApiConfig::default();
+
+    if let Ok(port) = env::var("API_PORT") {
+        config.api_port = port;
+    }
+    if let Ok(ttl) = env::var("SESSION_TTL_SECS") {
+        config.session_ttl_secs = ttl;
+    }
+    if let Ok(max_ttl) = env::var("SESSION_MAX_TTL_SECS") {
+        config.session_max_ttl_secs = max_ttl;
+    }
+
+    config
+}
+
+fn save_config(config: &ApiConfig) -> Result<(), String> {
+    let config_path = get_config_path()?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+
+    let json = serde_json::to_string_pretty(config).map_err(|err| err.to_string())?;
+    fs::write(&config_path, json).map_err(|err| err.to_string())?;
+
+    Ok(())
+}
+
+fn open_config_file() -> Result<(), String> {
+    let config_path = get_config_path()?;
+
+    // Se o arquivo não existe, cria um com valores padrão
+    if !config_path.exists() {
+        let default_config = ApiConfig::default();
+        save_config(&default_config)?;
+    }
+
+    // Abre o arquivo no editor padrão
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("notepad")
+            .arg(&config_path)
+            .spawn()
+            .map_err(|err| format!("Falha ao abrir arquivo de configuração: {err}"))?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        return Err("Abrir arquivo de configuração não é suportado nesta plataforma".to_string());
+    }
+
+    Ok(())
+}
+
+fn get_api_args() -> Vec<String> {
+    let config = load_config();
+
+    vec![
+        "--port".to_string(),
+        config.api_port,
+        "--session-ttl-secs".to_string(),
+        config.session_ttl_secs,
+        "--session-max-ttl-secs".to_string(),
+        config.session_max_ttl_secs,
+    ]
+}
 
 fn main() {
     let api_exe_path = api_exe_path();
@@ -55,6 +170,13 @@ fn main() {
             tray.add_menu_item("Reiniciar API", move || {
                 if let Err(err) = restart_api(&api_process_clone, &api_exe_path_clone) {
                     eprintln!("Erro ao reiniciar API: {err}");
+                }
+            })
+            .unwrap();
+
+            tray.add_menu_item("Abrir Configuração", || {
+                if let Err(err) = open_config_file() {
+                    eprintln!("Erro ao abrir configuração: {err}");
                 }
             })
             .unwrap();
@@ -108,8 +230,9 @@ fn start_api(
         ));
     }
 
+    let api_args = get_api_args();
     let child = Command::new(api_exe_path)
-        .args(API_ARGS)
+        .args(&api_args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

@@ -1,6 +1,6 @@
 param(
     [int]$Port = 5474,
-    [int]$SessionTtlSecs = 1800,
+    [int]$SessionTtlSecs = 7200,
     [string]$TaskName = "CofreApi",
     [string]$InstallDir = "$env:LOCALAPPDATA\CofreSenhaRust\api",
     [switch]$DoNotStartNow

@@ -1,7 +1,7 @@
 param(
     [string]$Version = "0.1.0",
     [int]$Port = 5474,
-    [int]$SessionTtlSecs = 1800,
+    [int]$SessionTtlSecs = 7200,
     [int]$SessionMaxTtlSecs = 43200,
     [string]$TaskName = "CofreApi",
     [string]$IsccPath = ""

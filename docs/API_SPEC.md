@@ -8,7 +8,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 
 ## Sessao
 
-- `ttl_secs` e o timeout de inatividade da sessao. Padrao: `1800` segundos, 30 minutos.
+- `ttl_secs` e o timeout de inatividade da sessao. Padrao: `7200` segundos, 2 horas.
 - `max_ttl_secs` e a vida maxima absoluta da sessao. Padrao: `43200` segundos, 12 horas.
 - `expires_at_unix` e renovado a cada chamada autenticada bem-sucedida, limitado por `max_expires_at_unix`.
 - Quando `expires_at_unix` ou `max_expires_at_unix` passam, a sessao e removida e a API retorna `401`.
@@ -48,7 +48,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
   "session_token": "token-gerado",
   "expires_at_unix": 1763383800,
   "max_expires_at_unix": 1763425200,
-  "ttl_secs": 1800,
+  "ttl_secs": 7200,
   "max_ttl_secs": 43200
 }
 ```
@@ -68,12 +68,12 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 {
   "expires_at_unix": 1763384700,
   "max_expires_at_unix": 1763425200,
-  "ttl_secs": 1800,
+  "ttl_secs": 7200,
   "max_ttl_secs": 43200
 }
 ```
 
-- Uso esperado: manter a sessao ativa quando a UI estiver em uso e obter o novo prazo de inatividade.
+- Uso esperado: manter a sessao ativa quando a UI estiver em uso e obter o novo prazo de inatividade (2 horas).
 - Erros:
 - 401: sessao invalida ou expirada
 
@@ -108,7 +108,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
   "session_token": "token-gerado",
   "expires_at_unix": 1763383800,
   "max_expires_at_unix": 1763425200,
-  "ttl_secs": 1800,
+  "ttl_secs": 7200,
   "max_ttl_secs": 43200
 }
 ```
@@ -255,9 +255,42 @@ Observacao: chamada autenticada bem-sucedida renova `expires_at_unix`, mas esta 
 - Erros:
 - 404: sessao nao encontrada
 
+### 13. Trocar Senha Mestra
+
+- Metodo: PUT
+- Rota: /api/v1/session/{session_token}/password
+- Observacao: a sessao que executa a troca permanece ativa; todas as outras sessoes ativas sao invalidada e precisarao relogar.
+- Body:
+
+```json
+{
+  "new_master_password": "nova-senha-mestra",
+  "confirm_new_master_password": "nova-senha-mestra"
+}
+```
+
+- Resposta 200:
+
+```json
+{
+  "session_token": "token-atual",
+  "expires_at_unix": 1763384700,
+  "max_expires_at_unix": 1763425200,
+  "ttl_secs": 7200,
+  "max_ttl_secs": 43200,
+  "invalidated_sessions": 2
+}
+```
+
+- Erros:
+- 400: nova senha ausente, confirmacao ausente, senhas divergentes ou senha mestra nova invalida
+- 401: sessao invalida ou expirada
+- 404: sessao nao encontrada
+
 ## Estado atual de seguranca
 
 - Implementado: sessao com timeout de inatividade configuravel, vida maxima absoluta, renovacao em atividade autenticada e invalidacao manual.
+- Implementado: troca de senha mestra com recriptografia do cofre, mantendo ativa apenas a sessao que realizou a alteracao.
 - Pendente: autenticacao por header (Bearer), assinatura de request e whitelist de origem.
 - Pendente: rate limit e auditoria local de acesso.
 

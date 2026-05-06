@@ -8,3 +8,4 @@ ui-tauri/yarn-error.log*
 ui-tauri/npm-debug.log*
 ui-tauri/src-tauri/target/
 dist/
+.env
