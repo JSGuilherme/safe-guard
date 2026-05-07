@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.1.0",
+    [string]$Version = "0.1.5",
     [int]$Port = 5474,
     [int]$SessionTtlSecs = 7200,
     [int]$SessionMaxTtlSecs = 43200,
@@ -94,10 +94,10 @@ if (-not (Test-Path $issFile)) {
 Push-Location $repoRoot
 
 try {
-    Write-Host "Compilando cofre_api e cofre_tray em release..."
-    cargo build --release --bin cofre_api --bin cofre_tray
+    Write-Host "Compilando cofre_api, cofre_tray e cofre_config_ui em release..."
+    cargo build --release --bin cofre_api --bin cofre_tray --bin cofre_config_ui
     if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao compilar cofre_api ou cofre_tray."
+        throw "Falha ao compilar os binarios de API/tray/config UI."
     }
 
     $iscc = Resolve-IsccPath -ExplicitPath $IsccPath

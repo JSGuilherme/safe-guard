@@ -102,12 +102,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\uninstall_cofre_api.p
 2. Na raiz do projeto, rode:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\build_setup.ps1 -Version 0.1.0
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\build_setup.ps1 -Version 0.1.5
 ```
 
 O setup sera gerado em:
 
-`dist\windows\CofreSenhaRustApi-Setup-0.1.0.exe`
+`dist\windows\CofreSenhaRustApi-Setup-0.1.5.exe`
 
 Para instalar, execute o `.exe` gerado. O instalador:
 - instala `cofre_api.exe`, `cofre_tray.exe` e `cofre_config_ui.exe` em `%LOCALAPPDATA%\CofreSenhaRust\api`,

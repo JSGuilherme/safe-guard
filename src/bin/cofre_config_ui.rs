@@ -8,10 +8,14 @@
 use iced::{Alignment, Element, Length, Sandbox, Settings};
 use iced::widget::{button, column, container, row, text, text_input};
 use std::fs;
+use std::process::Command;
 use std::path::PathBuf;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 const CONFIG_DIR: &str = "CofreSenhaRust";
 const CONFIG_FILE: &str = "config.yaml";
+const APP_ICON_BYTES: &[u8] = include_bytes!("../img/logo-sg.ico");
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 struct ApiConfig {
@@ -80,12 +84,24 @@ pub enum Message {
     SessionTtlChanged(String),
     SessionMaxTtlChanged(String),
     SavePressed,
+    RestartNowPressed,
+    RestartLaterPressed,
     CancelPressed,
 }
 
 pub struct ConfigApp {
     config: ApiConfig,
     message: Option<String>,
+    ask_restart_after_save: bool,
+}
+
+fn config_row<'a>(label: &'a str, input: iced::widget::TextInput<'a, Message>) -> iced::widget::Row<'a, Message> {
+    row![
+        text(label).width(Length::FillPortion(3)),
+        input.width(Length::FillPortion(2))
+    ]
+    .spacing(10)
+    .align_items(Alignment::Center)
 }
 
 impl Sandbox for ConfigApp {
@@ -96,6 +112,7 @@ impl Sandbox for ConfigApp {
         ConfigApp {
             config,
             message: None,
+            ask_restart_after_save: false,
         }
     }
 
@@ -120,12 +137,29 @@ impl Sandbox for ConfigApp {
             Message::SavePressed => {
                 match save_config(&self.config) {
                     Ok(_) => {
-                        self.message = Some("Configuração salva com sucesso!".to_string());
+                        self.message = Some("Configuração salva com sucesso. Deseja reiniciar a API agora?".to_string());
+                        self.ask_restart_after_save = true;
                     }
                     Err(e) => {
                         self.message = Some(format!("Erro ao salvar: {}", e));
+                        self.ask_restart_after_save = false;
                     }
                 }
+            }
+            Message::RestartNowPressed => {
+                match restart_api_now(&self.config) {
+                    Ok(_) => {
+                        self.message = Some("API reiniciada com sucesso.".to_string());
+                    }
+                    Err(e) => {
+                        self.message = Some(format!("Configuração salva, mas falha ao reiniciar a API: {}", e));
+                    }
+                }
+                self.ask_restart_after_save = false;
+            }
+            Message::RestartLaterPressed => {
+                self.message = Some("Configuração salva. Reinicie a API manualmente para aplicar as alterações.".to_string());
+                self.ask_restart_after_save = false;
             }
             Message::CancelPressed => {
                 std::process::exit(0);
@@ -133,42 +167,70 @@ impl Sandbox for ConfigApp {
         }
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         let api_port_input = text_input("5474", &self.config.api_port)
             .on_input(Message::ApiPortChanged)
-            .padding(10);
+            .padding(8);
 
         let ttl_input = text_input("7200", &self.config.session_ttl_secs)
             .on_input(Message::SessionTtlChanged)
-            .padding(10);
+            .padding(8);
 
         let max_ttl_input = text_input("43200", &self.config.session_max_ttl_secs)
             .on_input(Message::SessionMaxTtlChanged)
-            .padding(10);
+            .padding(8);
 
         let save_btn = button("Salvar")
-            .padding(10)
+            .padding(8)
             .on_press(Message::SavePressed);
 
         let cancel_btn = button("Cancelar")
-            .padding(10)
+            .padding(8)
             .on_press(Message::CancelPressed);
 
         let buttons = row![save_btn, cancel_btn].spacing(10);
 
+        if self.ask_restart_after_save {
+            let restart_popup = container(
+                column![
+                    text("Configuração salva").size(22),
+                    text("Deseja reiniciar a API agora?"),
+                    row![
+                        button("Reiniciar agora")
+                            .padding(8)
+                            .on_press(Message::RestartNowPressed),
+                        button("Mais tarde")
+                            .padding(8)
+                            .on_press(Message::RestartLaterPressed)
+                    ]
+                    .spacing(10)
+                ]
+                .spacing(12)
+                .align_items(Alignment::Center),
+            )
+            .padding(20)
+            .max_width(360);
+
+            return container(restart_popup)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x()
+                .center_y()
+                .into();
+        }
+
         let mut content = column![
-            text("Configuração da API CofreSenha"),
-            text("Porta da API:"),
-            api_port_input,
-            text("Timeout de Inatividade (segundos):"),
-            ttl_input,
-            text("Timeout Máximo da Sessão (segundos):"),
-            max_ttl_input,
+            text("Configuração da API").size(24),
+            text("Ajuste porta e tempo de sessão.").size(14),
+            config_row("Porta da API", api_port_input),
+            config_row("Timeout inatividade (s)", ttl_input),
+            config_row("Timeout máximo sessão (s)", max_ttl_input),
             buttons
         ]
-        .spacing(10)
-        .padding(20)
-        .align_items(Alignment::Center);
+        .spacing(12)
+        .padding(16)
+        .max_width(460)
+        .align_items(Alignment::Start);
 
         if let Some(msg) = &self.message {
             content = content.push(text(msg.clone()));
@@ -184,5 +246,69 @@ impl Sandbox for ConfigApp {
 }
 
 pub fn main() -> iced::Result {
-    <ConfigApp as Sandbox>::run(Settings::default())
+    let window_icon = iced::window::icon::from_file_data(APP_ICON_BYTES, None).ok();
+
+    <ConfigApp as Sandbox>::run(Settings {
+        window: iced::window::Settings {
+            size: iced::Size::new(520.0, 320.0),
+            resizable: false,
+            icon: window_icon,
+            ..Default::default()
+        },
+        ..Settings::default()
+    })
+}
+
+fn restart_api_now(config: &ApiConfig) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let api_exe = api_exe_path();
+
+        if !api_exe.exists() {
+            return Err(format!("cofre_api.exe nao encontrado em {}", api_exe.display()));
+        }
+
+        let mut taskkill = Command::new("taskkill");
+        taskkill
+            .args(["/IM", "cofre_api.exe", "/F", "/T"])
+            .creation_flags(CREATE_NO_WINDOW);
+        let _ = taskkill.output();
+
+        let api_args = vec![
+            "--port".to_string(),
+            config.api_port.clone(),
+            "--session-ttl-secs".to_string(),
+            config.session_ttl_secs.clone(),
+            "--session-max-ttl-secs".to_string(),
+            config.session_max_ttl_secs.clone(),
+        ];
+
+        let mut api_command = Command::new(api_exe);
+        api_command
+            .args(&api_args)
+            .creation_flags(CREATE_NO_WINDOW);
+
+        api_command
+            .spawn()
+            .map_err(|err| format!("Falha ao reiniciar a API: {err}"))?;
+
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = config;
+        Err("Reiniciar a API nesta plataforma não é suportado".to_string())
+    }
+}
+
+fn api_exe_path() -> PathBuf {
+    match std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join("cofre_api.exe")))
+    {
+        Some(path) => path,
+        None => PathBuf::from("cofre_api.exe"),
+    }
 }

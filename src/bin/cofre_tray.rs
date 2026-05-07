@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tray_item::TrayItem;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 const ICON_RESOURCE: &str = "COFRE_TRAY";
 const DEFAULT_API_PORT: &str = "5474";
@@ -111,6 +113,10 @@ fn open_config_file() -> Result<(), String> {
     // Abre a UI de configuração (cofre_config_ui.exe)
     #[cfg(target_os = "windows")]
     {
+        if focus_existing_config_window()? {
+            return Ok(());
+        }
+
         // Tenta encontrar cofre_config_ui.exe no mesmo diretório que cofre_tray.exe
         if let Some(exe_dir) = std::env::current_exe()
             .ok()
@@ -135,6 +141,30 @@ fn open_config_file() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn focus_existing_config_window() -> Result<bool, String> {
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let script = "$p = Get-Process -Name cofre_config_ui -ErrorAction SilentlyContinue | Select-Object -First 1; if ($null -eq $p) { exit 1 }; $ws = New-Object -ComObject WScript.Shell; if ($ws.AppActivate($p.Id)) { exit 0 } else { exit 2 }";
+
+    let mut command = Command::new("powershell");
+    command
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
+
+    let status = command
+        .status()
+        .map_err(|err| format!("Falha ao verificar janela de configuração: {err}"))?;
+
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        Some(2) => Err("A janela de configuração já está aberta, mas não foi possível trazê-la para foco.".to_string()),
+        _ => Err("Falha ao consultar a janela de configuração existente.".to_string()),
+    }
 }
 
 fn get_api_args() -> Vec<String> {

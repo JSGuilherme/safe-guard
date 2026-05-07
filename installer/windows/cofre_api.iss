@@ -3,7 +3,7 @@
 #define MyTrayExeName "cofre_tray.exe"
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0"
+  #define MyAppVersion "0.1.5"
 #endif
 
 #ifndef ApiPort
@@ -26,6 +26,8 @@
 AppId={{9DCA0F1E-2C66-4F49-8587-F95E48E8C67B}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+SetupIconFile=..\..\src\img\logo-sg.ico
+UninstallDisplayIcon={app}\{#MyTrayExeName}
 DefaultDirName={localappdata}\CofreSenhaRust\api
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist\windows
