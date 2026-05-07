@@ -17,11 +17,11 @@ O projeto esta sendo construido em fases:
 
 ## Estrutura do projeto
 
-- `src/lib.rs`: nucleo do cofre, criptografia e persistencia.
+- `src/lib.rs`: núcleo do cofre, criptografia e persistência.
 - `src/main.rs`: CLI principal.
-- `src/bin/cofre_api.rs`: API local para integracao com extensao e outras interfaces.
-- `src/bin/cofre_desktop.rs`: interface desktop Rust existente.
-- `plan.md`: plano de evolucao do projeto.
+- `src/bin/cofre_api.rs`: API local REST para integração com extensões e outras interfaces.
+- `src/bin/cofre_tray.rs`: aplicação de bandeja do Windows para gerenciar a API.
+- `src/bin/cofre_config_ui.rs`: interface gráfica (iced) para editar configurações da API.
 
 ## Requisitos
 
@@ -63,12 +63,6 @@ Sessao da API:
 - `--session-max-ttl-secs`: vida maxima absoluta da sessao. Padrao: `43200` segundos, 12 horas.
 - Cada chamada autenticada valida a sessao e renova `expires_at_unix` ate o limite de `max_expires_at_unix`.
 - `POST /api/v1/lock/{session_token}` invalida a sessao imediatamente.
-
-### Iniciar a interface desktop Rust existente
-
-```bash
-cargo run --bin cofre_desktop
-```
 
 ### Instalar API para iniciar com o Windows
 
@@ -116,7 +110,7 @@ O setup sera gerado em:
 `dist\windows\CofreSenhaRustApi-Setup-0.1.0.exe`
 
 Para instalar, execute o `.exe` gerado. O instalador:
-- instala `cofre_api.exe` e `cofre_tray.exe` em `%LOCALAPPDATA%\CofreSenhaRust\api`,
+- instala `cofre_api.exe`, `cofre_tray.exe` e `cofre_config_ui.exe` em `%LOCALAPPDATA%\CofreSenhaRust\api`,
 - registra `cofre_tray.exe` em `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`,
 - inicia o tray app ao final da instalacao,
 - remove tarefas agendadas antigas chamadas `CofreApi`, se existirem.

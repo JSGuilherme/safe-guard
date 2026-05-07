@@ -39,6 +39,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 [Files]
 Source: "..\..\target\release\cofre_api.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\target\release\cofre_tray.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\target\release\cofre_config_ui.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "unregister_task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]

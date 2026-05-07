@@ -11,8 +11,9 @@ chacha20poly1305 = "0.10"
 clap = { version = "4.5", features = ["derive"] }
 dirs = "6.0"
 dotenv = "0.15"
-eframe = "0.33"
+iced = { version = "0.12", features = ["debug"] }
 rand = "0.8"
+serde_yaml = "0.9"
 rpassword = "7.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

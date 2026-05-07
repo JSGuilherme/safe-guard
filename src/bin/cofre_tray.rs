@@ -19,7 +19,7 @@ const DEFAULT_API_PORT: &str = "5474";
 const DEFAULT_SESSION_TTL_SECS: &str = "7200";
 const DEFAULT_SESSION_MAX_TTL_SECS: &str = "43200";
 const CONFIG_DIR: &str = "CofreSenhaRust";
-const CONFIG_FILE: &str = "config.json";
+const CONFIG_FILE: &str = "config.yaml";
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 struct ApiConfig {
@@ -60,10 +60,10 @@ fn get_config_path() -> Result<PathBuf, String> {
 }
 
 fn load_config() -> ApiConfig {
-    // Tenta carregar do arquivo de configuração primeiro
+    // Tenta carregar do arquivo YAML primeiro
     if let Ok(config_path) = get_config_path() {
         if let Ok(content) = fs::read_to_string(&config_path) {
-            if let Ok(config) = serde_json::from_str::<ApiConfig>(&content) {
+            if let Ok(config) = serde_yaml::from_str::<ApiConfig>(&content) {
                 return config;
             }
         }
@@ -93,8 +93,8 @@ fn save_config(config: &ApiConfig) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
 
-    let json = serde_json::to_string_pretty(config).map_err(|err| err.to_string())?;
-    fs::write(&config_path, json).map_err(|err| err.to_string())?;
+    let yaml = serde_yaml::to_string(config).map_err(|err| err.to_string())?;
+    fs::write(&config_path, yaml).map_err(|err| err.to_string())?;
 
     Ok(())
 }
@@ -108,13 +108,25 @@ fn open_config_file() -> Result<(), String> {
         save_config(&default_config)?;
     }
 
-    // Abre o arquivo no editor padrão
+    // Abre a UI de configuração (cofre_config_ui.exe)
     #[cfg(target_os = "windows")]
     {
-        Command::new("notepad")
-            .arg(&config_path)
-            .spawn()
-            .map_err(|err| format!("Falha ao abrir arquivo de configuração: {err}"))?;
+        // Tenta encontrar cofre_config_ui.exe no mesmo diretório que cofre_tray.exe
+        if let Some(exe_dir) = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        {
+            let config_ui_exe = exe_dir.join("cofre_config_ui.exe");
+            if config_ui_exe.exists() {
+                Command::new(config_ui_exe)
+                    .spawn()
+                    .map_err(|err| format!("Falha ao abrir configuração: {err}"))?;
+            } else {
+                return Err("Arquivo cofre_config_ui.exe não encontrado".to_string());
+            }
+        } else {
+            return Err("Não foi possível determinar o diretório da aplicação".to_string());
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
