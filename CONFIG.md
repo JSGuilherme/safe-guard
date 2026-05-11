@@ -5,23 +5,32 @@
 O arquivo de configuração está localizado em:
 
 ```
-%LOCALAPPDATA%\CofreSenhaRust\config.json
+%LOCALAPPDATA%\CofreSenhaRust\config.yaml
 ```
 
 No Windows, isso geralmente é:
 
 ```
-C:\Users\[seu_usuario]\AppData\Local\CofreSenhaRust\config.json
+C:\Users\[seu_usuario]\AppData\Local\CofreSenhaRust\config.yaml
 ```
 
 ## Como editar a configuração
 
+### Opção 1: pela interface gráfica (recomendado)
+
+1. No ícone do tray, clique em **Abrir Configuração**
+2. Edite os valores desejados
+3. Clique em **Salvar**
+4. Escolha **Reiniciar agora** para aplicar imediatamente (ou **Mais tarde**)
+
+### Opção 2: edição manual
+
 1. Abra o explorador de arquivos
 2. Cole o caminho acima na barra de endereço
-3. Abra o arquivo `config.json` com um editor de texto (Notepad, VS Code, etc.)
+3. Abra o arquivo `config.yaml` com um editor de texto (Notepad, VS Code, etc.)
 4. Edite os valores desejados
 5. Salve o arquivo
-6. Reinicie o tray app (feche e abra novamente)
+6. Reinicie a API (pelo tray ou pela tela de configuração)
 
 ## Opções disponíveis
 
@@ -30,35 +39,33 @@ C:\Users\[seu_usuario]\AppData\Local\CofreSenhaRust\config.json
 - **Descrição**: Porta em que a API local escuta
 - **Padrão**: `5474`
 - **Tipo**: String
-- **Exemplo**: `"api_port": "5475"`
+- **Exemplo**: `api_port: "5475"`
 
 ### `session_ttl_secs`
 
 - **Descrição**: Timeout de inatividade da sessão em segundos
 - **Padrão**: `7200` (2 horas)
 - **Tipo**: String
-- **Exemplo**: `"session_ttl_secs": "3600"` (1 hora)
+- **Exemplo**: `session_ttl_secs: "3600"` (1 hora)
 
 ### `session_max_ttl_secs`
 
 - **Descrição**: Vida máxima absoluta da sessão em segundos
 - **Padrão**: `43200` (12 horas)
 - **Tipo**: String
-- **Exemplo**: `"session_max_ttl_secs": "86400"` (24 horas)
+- **Exemplo**: `session_max_ttl_secs: "86400"` (24 horas)
 
-## Exemplo de arquivo config.json
+## Exemplo de arquivo `config.yaml`
 
-```json
-{
-  "api_port": "5474",
-  "session_ttl_secs": "7200",
-  "session_max_ttl_secs": "43200"
-}
+```yaml
+api_port: "5474"
+session_ttl_secs: "7200"
+session_max_ttl_secs: "43200"
 ```
 
 ## Fallback de configuração
 
-Se o arquivo `config.json` não existir ou tiver erros, o tray app usará:
+Se o arquivo `config.yaml` não existir ou tiver erros, o tray app usará:
 
 1. Variáveis de ambiente (do arquivo `.env` na raiz do projeto)
 2. Valores padrão embutidos no código
@@ -68,5 +75,5 @@ Se o arquivo `config.json` não existir ou tiver erros, o tray app usará:
 - Todos os valores devem ser strings válidas
 - Os timeouts devem ser números válidos (em segundos)
 - A porta deve ser um número entre 1 e 65535
-- Após editar, reinicie o tray app para que as mudanças tenham efeito
-- Se houver erro no JSON, o arquivo será ignorado e os padrões serão usados
+- Após editar, reinicie a API para que as mudanças tenham efeito
+- Se houver erro no YAML, o arquivo será ignorado e os padrões serão usados
