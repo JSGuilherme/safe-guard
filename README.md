@@ -184,6 +184,8 @@ O cofre e salvo em:
 
 `%LOCALAPPDATA%\CofreSenhaRust\vault.dat`
 
+A cada gravacao, a versao anterior e preservada em `vault.dat.bak` na mesma pasta. Se o cofre principal ficar inacessivel, renomeie o `.bak` para `vault.dat` para restaurar o estado anterior a ultima alteracao.
+
 ## Seguranca
 
 - O cofre inteiro e criptografado em disco.
@@ -207,7 +209,7 @@ Itens levantados na revisao de seguranca e desempenho de 2026-07-13. Marcar com 
 - [ ] **S2. Mover token de sessao da URL para header** — o token no path vaza em logs, historico e `Referer`. Acao: usar `Authorization: Bearer <token>`; atualizar rotas, extensao e `docs/API_SPEC.md`. (`src/bin/cofre_api.rs:183-207`)
 - [ ] **S3. Rate limiting / backoff no `/unlock`** — sem limite de tentativas, permite brute force da senha mestra. Acao: backoff exponencial apos N falhas consecutivas. (`src/bin/cofre_api.rs:260`)
 - [ ] **S4. Zerar segredos na memoria** — `SessionState` guarda a senha mestra em `String` plana por ate 12h, clonada a cada requisicao; `#[derive(Debug)]` em tipos sensiveis pode vaza-la em logs. Acao: usar `zeroize`/`secrecy`, armazenar chave derivada em vez da senha, remover `Debug` de tipos sensiveis. (`src/bin/cofre_api.rs:46-50`, `src/lib.rs:35-44`)
-- [ ] **S5. Escrita atomica do cofre + backup** — `fs::write` sobrescreve `vault.dat` direto; crash no meio da escrita corrompe o arquivo e perde todas as senhas. Acao: gravar em arquivo temporario + `rename`; manter `vault.dat.bak`. (`src/lib.rs:115`)
+- [x] **S5. Escrita atomica do cofre + backup** — `fs::write` sobrescrevia `vault.dat` direto; crash no meio da escrita corrompia o arquivo. Resolvido: gravacao em arquivo temporario com sync + `rename` atomico, e a versao anterior e preservada em `vault.dat.bak`. (`src/lib.rs`, `write_vault_file_atomic`)
 
 ### Seguranca — Medio
 
