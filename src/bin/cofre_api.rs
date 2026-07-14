@@ -7,8 +7,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::extract::{FromRequestParts, Path, Request, State};
+use axum::http::request::Parts;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use clap::Parser;
@@ -163,6 +166,85 @@ struct NotesResponse {
     notas: Option<String>,
 }
 
+/// Token de sessao extraido do header `Authorization: Bearer <token>`.
+struct SessionToken(String);
+
+impl<S> FromRequestParts<S> for SessionToken
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, Json<ErrorResponse>);
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let header_value = parts
+            .headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| err_unauthorized("Header Authorization nao informado"))?;
+
+        let token = header_value
+            .strip_prefix("Bearer ")
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .ok_or_else(|| err_unauthorized("Use o formato: Authorization: Bearer <token>"))?;
+
+        Ok(SessionToken(token.to_string()))
+    }
+}
+
+/// Bloqueia DNS rebinding: o header Host precisa apontar para a propria maquina
+/// e, quando presente, o Origin precisa ser uma extensao de navegador ou pagina local.
+async fn enforce_local_origin(request: Request, next: Next) -> Response {
+    let headers = request.headers();
+
+    if !host_is_local(headers) {
+        return err_forbidden("Host nao permitido").into_response();
+    }
+
+    if let Some(origin) = headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()) {
+        if !origin_is_allowed(origin) {
+            return err_forbidden("Origem nao permitida").into_response();
+        }
+    }
+
+    next.run(request).await
+}
+
+fn host_is_local(headers: &HeaderMap) -> bool {
+    let Some(host) = headers.get(header::HOST).and_then(|value| value.to_str().ok()) else {
+        return false;
+    };
+
+    let host_name = host.rsplit_once(':').map_or(host, |(name, _port)| name);
+    host_name.eq_ignore_ascii_case("127.0.0.1") || host_name.eq_ignore_ascii_case("localhost")
+}
+
+fn origin_is_allowed(origin: &str) -> bool {
+    const EXTENSION_SCHEMES: [&str; 3] = [
+        "chrome-extension://",
+        "moz-extension://",
+        "safari-web-extension://",
+    ];
+
+    let origin_lower = origin.to_ascii_lowercase();
+    if EXTENSION_SCHEMES
+        .iter()
+        .any(|scheme| origin_lower.starts_with(scheme))
+    {
+        return true;
+    }
+
+    let Some(rest) = origin_lower
+        .strip_prefix("http://")
+        .or_else(|| origin_lower.strip_prefix("https://"))
+    else {
+        return false;
+    };
+
+    let host_name = rest.split([':', '/']).next().unwrap_or("");
+    host_name == "127.0.0.1" || host_name == "localhost"
+}
+
 #[tokio::main]
 async fn main() {
     if let Err(err) = run().await {
@@ -184,26 +266,17 @@ async fn run() -> Result<(), String> {
         .route("/api/v1/health", get(health))
         .route("/api/v1/vault", get(vault_status).post(create_vault))
         .route("/api/v1/unlock", post(unlock))
-        .route("/api/v1/session/{session_token}/touch", post(touch_session))
+        .route("/api/v1/session/touch", post(touch_session))
+        .route("/api/v1/session/password", put(change_master_password))
+        .route("/api/v1/entries", get(list_entries).post(create_entry))
         .route(
-            "/api/v1/session/{session_token}/password",
-            put(change_master_password),
-        )
-        .route("/api/v1/entries/{session_token}", get(list_entries))
-        .route("/api/v1/entries/{session_token}", post(create_entry))
-        .route(
-            "/api/v1/entries/{session_token}/{entry_id}/password",
-            get(get_entry_password),
-        )
-        .route(
-            "/api/v1/entries/{session_token}/{entry_id}/notes",
-            get(get_entry_notes),
-        )
-        .route(
-            "/api/v1/entries/{session_token}/{entry_id}",
+            "/api/v1/entries/{entry_id}",
             put(edit_entry).delete(delete_entry),
         )
-        .route("/api/v1/lock/{session_token}", post(lock_session))
+        .route("/api/v1/entries/{entry_id}/password", get(get_entry_password))
+        .route("/api/v1/entries/{entry_id}/notes", get(get_entry_notes))
+        .route("/api/v1/lock", post(lock_session))
+        .layer(middleware::from_fn(enforce_local_origin))
         .with_state(shared);
 
     let addr = format!("127.0.0.1:{}", args.port);
@@ -285,7 +358,7 @@ async fn unlock(
 
 async fn touch_session(
     State(state): State<AppState>,
-    Path(session_token): Path<String>,
+    SessionToken(session_token): SessionToken,
 ) -> Result<Json<SessionRefreshResponse>, (StatusCode, Json<ErrorResponse>)> {
     let session = refresh_session_access(&state, session_token.as_str())?;
     Ok(Json(SessionRefreshResponse {
@@ -298,7 +371,7 @@ async fn touch_session(
 
 async fn change_master_password(
     State(state): State<AppState>,
-    Path(session_token): Path<String>,
+    SessionToken(session_token): SessionToken,
     Json(payload): Json<ChangeMasterPasswordRequest>,
 ) -> Result<Json<ChangeMasterPasswordResponse>, (StatusCode, Json<ErrorResponse>)> {
     if payload.new_master_password.trim().is_empty() {
@@ -339,7 +412,7 @@ async fn change_master_password(
 
 async fn list_entries(
     State(state): State<AppState>,
-    Path(session_token): Path<String>,
+    SessionToken(session_token): SessionToken,
 ) -> Result<Json<ListEntriesResponse>, (StatusCode, Json<ErrorResponse>)> {
     let vault = read_vault_for_session(&state, session_token.as_str())?;
 
@@ -360,7 +433,7 @@ async fn list_entries(
 
 async fn create_entry(
     State(state): State<AppState>,
-    Path(session_token): Path<String>,
+    SessionToken(session_token): SessionToken,
     Json(payload): Json<EntryUpsertRequest>,
 ) -> Result<(StatusCode, Json<EntryUpsertResponse>), (StatusCode, Json<ErrorResponse>)> {
     if payload.servico.trim().is_empty() {
@@ -410,7 +483,8 @@ async fn create_entry(
 
 async fn get_entry_password(
     State(state): State<AppState>,
-    Path((session_token, entry_id)): Path<(String, String)>,
+    SessionToken(session_token): SessionToken,
+    Path(entry_id): Path<String>,
 ) -> Result<Json<PasswordResponse>, (StatusCode, Json<ErrorResponse>)> {
     let vault = read_vault_for_session(&state, session_token.as_str())?;
 
@@ -427,7 +501,8 @@ async fn get_entry_password(
 
 async fn get_entry_notes(
     State(state): State<AppState>,
-    Path((session_token, entry_id)): Path<(String, String)>,
+    SessionToken(session_token): SessionToken,
+    Path(entry_id): Path<String>,
 ) -> Result<Json<NotesResponse>, (StatusCode, Json<ErrorResponse>)> {
     let vault = read_vault_for_session(&state, session_token.as_str())?;
 
@@ -444,7 +519,8 @@ async fn get_entry_notes(
 
 async fn edit_entry(
     State(state): State<AppState>,
-    Path((session_token, entry_id)): Path<(String, String)>,
+    SessionToken(session_token): SessionToken,
+    Path(entry_id): Path<String>,
     Json(payload): Json<EntryEditRequest>,
 ) -> Result<Json<EntryUpsertResponse>, (StatusCode, Json<ErrorResponse>)> {
     let (master_password, mut vault) =
@@ -493,7 +569,8 @@ async fn edit_entry(
 
 async fn delete_entry(
     State(state): State<AppState>,
-    Path((session_token, entry_id)): Path<(String, String)>,
+    SessionToken(session_token): SessionToken,
+    Path(entry_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     let (master_password, mut vault) =
         read_vault_and_master_for_session(&state, session_token.as_str())?;
@@ -513,7 +590,7 @@ async fn delete_entry(
 
 async fn lock_session(
     State(state): State<AppState>,
-    Path(session_token): Path<String>,
+    SessionToken(session_token): SessionToken,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     let mut guard = state
         .sessions
@@ -715,6 +792,15 @@ fn err_not_found(message: &str) -> (StatusCode, Json<ErrorResponse>) {
     )
 }
 
+fn err_forbidden(message: &str) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::FORBIDDEN,
+        Json(ErrorResponse {
+            error: message.to_string(),
+        }),
+    )
+}
+
 fn err_unauthorized(message: &str) -> (StatusCode, Json<ErrorResponse>) {
     (
         StatusCode::UNAUTHORIZED,
@@ -738,4 +824,50 @@ fn err_internal(message: String) -> (StatusCode, Json<ErrorResponse>) {
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ErrorResponse { error: message }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    fn headers_with_host(host: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_str(host).unwrap());
+        headers
+    }
+
+    #[test]
+    fn host_local_e_aceito() {
+        assert!(host_is_local(&headers_with_host("127.0.0.1:5474")));
+        assert!(host_is_local(&headers_with_host("127.0.0.1")));
+        assert!(host_is_local(&headers_with_host("localhost:5474")));
+        assert!(host_is_local(&headers_with_host("LocalHost:5474")));
+    }
+
+    #[test]
+    fn host_externo_e_rejeitado_contra_dns_rebinding() {
+        assert!(!host_is_local(&headers_with_host("atacante.com:5474")));
+        assert!(!host_is_local(&headers_with_host("localhost.atacante.com")));
+        assert!(!host_is_local(&headers_with_host("192.168.0.10:5474")));
+        assert!(!host_is_local(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn origin_de_extensao_ou_local_e_aceito() {
+        assert!(origin_is_allowed("chrome-extension://abcdef"));
+        assert!(origin_is_allowed("moz-extension://abcdef"));
+        assert!(origin_is_allowed("safari-web-extension://abcdef"));
+        assert!(origin_is_allowed("http://127.0.0.1:5474"));
+        assert!(origin_is_allowed("http://localhost:3000"));
+    }
+
+    #[test]
+    fn origin_de_site_externo_e_rejeitado() {
+        assert!(!origin_is_allowed("https://atacante.com"));
+        assert!(!origin_is_allowed("http://localhost.atacante.com"));
+        assert!(!origin_is_allowed("http://localhost.atacante.com:5474"));
+        assert!(!origin_is_allowed("null"));
+        assert!(!origin_is_allowed("file://"));
+    }
 }

@@ -83,7 +83,8 @@ cargo run --bin cofre_config_ui
 - `--session-ttl-secs`: timeout de inatividade (padrao: `7200`, 2 horas).
 - `--session-max-ttl-secs`: vida maxima absoluta da sessao (padrao: `43200`, 12 horas).
 - Chamadas autenticadas renovam `expires_at_unix` ate `max_expires_at_unix`.
-- `POST /api/v1/lock/{session_token}` invalida a sessao imediatamente.
+- Endpoints autenticados exigem o header `Authorization: Bearer <session_token>`.
+- `POST /api/v1/lock` invalida a sessao imediatamente.
 
 ## Instalacao no Windows
 
@@ -136,19 +137,24 @@ Comportamento do instalador:
 
 ## Endpoints atuais
 
+Publicos:
+
 - `GET /api/v1/health`
 - `GET /api/v1/vault`
 - `POST /api/v1/vault`
 - `POST /api/v1/unlock`
-- `POST /api/v1/session/{session_token}/touch`
-- `PUT /api/v1/session/{session_token}/password`
-- `GET /api/v1/entries/{session_token}`
-- `POST /api/v1/entries/{session_token}`
-- `PUT /api/v1/entries/{session_token}/{entry_id}`
-- `DELETE /api/v1/entries/{session_token}/{entry_id}`
-- `GET /api/v1/entries/{session_token}/{entry_id}/password`
-- `GET /api/v1/entries/{session_token}/{entry_id}/notes`
-- `POST /api/v1/lock/{session_token}`
+
+Autenticados (header `Authorization: Bearer <session_token>`):
+
+- `POST /api/v1/session/touch`
+- `PUT /api/v1/session/password`
+- `GET /api/v1/entries`
+- `POST /api/v1/entries`
+- `PUT /api/v1/entries/{entry_id}`
+- `DELETE /api/v1/entries/{entry_id}`
+- `GET /api/v1/entries/{entry_id}/password`
+- `GET /api/v1/entries/{entry_id}/notes`
+- `POST /api/v1/lock`
 
 Contrato detalhado: `docs\API_SPEC.md`  
 Postman collection: `docs\cofre_api.postman_collection.json`
@@ -205,8 +211,8 @@ Itens levantados na revisao de seguranca e desempenho de 2026-07-13. Marcar com 
 
 ### Seguranca — Critico / Alto
 
-- [ ] **S1. Protecao contra DNS rebinding na API** — a API nao valida os headers `Host`/`Origin`; um site malicioso pode usar DNS rebinding para tratar `127.0.0.1` como same-origin e acessar o cofre. Acao: rejeitar requisicoes cujo `Host` nao seja `127.0.0.1:<porta>`/`localhost:<porta>`; considerar token de pareamento com a extensao. (`src/bin/cofre_api.rs`, router ~linha 183)
-- [ ] **S2. Mover token de sessao da URL para header** — o token no path vaza em logs, historico e `Referer`. Acao: usar `Authorization: Bearer <token>`; atualizar rotas, extensao e `docs/API_SPEC.md`. (`src/bin/cofre_api.rs:183-207`)
+- [x] **S1. Protecao contra DNS rebinding na API** — resolvido: middleware `enforce_local_origin` rejeita com `403` requisicoes cujo `Host` nao seja `127.0.0.1`/`localhost` e origens que nao sejam extensao de navegador ou pagina local. (`src/bin/cofre_api.rs`)
+- [x] **S2. Mover token de sessao da URL para header** — resolvido: todas as rotas autenticadas usam `Authorization: Bearer <token>` via extractor `SessionToken`; o token nao aparece mais no path. Guia para adaptar a extensao: `docs/EXTENSION_MIGRATION.md`. (`src/bin/cofre_api.rs`)
 - [ ] **S3. Rate limiting / backoff no `/unlock`** — sem limite de tentativas, permite brute force da senha mestra. Acao: backoff exponencial apos N falhas consecutivas. (`src/bin/cofre_api.rs:260`)
 - [ ] **S4. Zerar segredos na memoria** — `SessionState` guarda a senha mestra em `String` plana por ate 12h, clonada a cada requisicao; `#[derive(Debug)]` em tipos sensiveis pode vaza-la em logs. Acao: usar `zeroize`/`secrecy`, armazenar chave derivada em vez da senha, remover `Debug` de tipos sensiveis. (`src/bin/cofre_api.rs:46-50`, `src/lib.rs:35-44`)
 - [x] **S5. Escrita atomica do cofre + backup** — `fs::write` sobrescrevia `vault.dat` direto; crash no meio da escrita corrompia o arquivo. Resolvido: gravacao em arquivo temporario com sync + `rename` atomico, e a versao anterior e preservada em `vault.dat.bak`. (`src/lib.rs`, `write_vault_file_atomic`)

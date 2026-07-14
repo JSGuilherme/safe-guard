@@ -1,10 +1,30 @@
-# API Local v1 (Rascunho Inicial)
+# API Local v1
 
-Este documento descreve o contrato inicial da API local usada para integracao com extensao de navegador.
+Este documento descreve o contrato da API local usada para integracao com extensao de navegador.
 
 ## Base URL
 
 - http://127.0.0.1:5474
+
+## Autenticacao
+
+Endpoints autenticados exigem o token de sessao no header:
+
+```
+Authorization: Bearer <session_token>
+```
+
+- O token e obtido em `POST /api/v1/unlock` ou `POST /api/v1/vault`.
+- Sem o header, ou com formato diferente de `Bearer <token>`, a API retorna `401`.
+- O token NAO trafega mais na URL (mudanca da v0.1.5 para v0.1.6 — ver `docs/EXTENSION_MIGRATION.md`).
+
+## Restricao de origem (anti DNS rebinding)
+
+Todas as requisicoes passam por validacao de headers:
+
+- `Host` precisa ser `127.0.0.1[:porta]` ou `localhost[:porta]`; caso contrario a API retorna `403`.
+- `Origin`, quando presente, precisa ser `chrome-extension://`, `moz-extension://`, `safari-web-extension://` ou pagina em `http(s)://127.0.0.1`/`localhost`; caso contrario `403`.
+- Requisicoes sem `Origin` (curl, apps nativos) sao aceitas.
 
 ## Sessao
 
@@ -12,7 +32,7 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 - `max_ttl_secs` e a vida maxima absoluta da sessao. Padrao: `43200` segundos, 12 horas.
 - `expires_at_unix` e renovado a cada chamada autenticada bem-sucedida, limitado por `max_expires_at_unix`.
 - Quando `expires_at_unix` ou `max_expires_at_unix` passam, a sessao e removida e a API retorna `401`.
-- `POST /api/v1/lock/{session_token}` remove a sessao imediatamente.
+- `POST /api/v1/lock` remove a sessao imediatamente.
 
 ## Endpoints
 
@@ -61,7 +81,8 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 ### 3. Renovar Atividade da Sessao
 
 - Metodo: POST
-- Rota: /api/v1/session/{session_token}/touch
+- Rota: /api/v1/session/touch
+- Autenticacao: `Authorization: Bearer <token>`
 - Resposta 200:
 
 ```json
@@ -120,7 +141,8 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 ### 6. Listagem de Entradas
 
 - Metodo: GET
-- Rota: /api/v1/entries/{session_token}
+- Rota: /api/v1/entries
+- Autenticacao: `Authorization: Bearer <token>`
 - Resposta 200:
 
 ```json
@@ -140,12 +162,13 @@ Este documento descreve o contrato inicial da API local usada para integracao co
 - Erros:
 - 401: sessao invalida ou expirada
 
-Observacao: chamada autenticada bem-sucedida renova `expires_at_unix`, mas esta resposta nao retorna o novo prazo. Use `/api/v1/session/{session_token}/touch` quando a UI precisar sincronizar o contador.
+Observacao: chamada autenticada bem-sucedida renova `expires_at_unix`, mas esta resposta nao retorna o novo prazo. Use `/api/v1/session/touch` quando a UI precisar sincronizar o contador.
 
 ### 7. Cadastrar Chave
 
 - Metodo: POST
-- Rota: /api/v1/entries/{session_token}
+- Rota: /api/v1/entries
+- Autenticacao: `Authorization: Bearer <token>`
 - Body:
 
 ```json
@@ -176,7 +199,8 @@ Observacao: chamada autenticada bem-sucedida renova `expires_at_unix`, mas esta 
 ### 8. Editar Chave por ID
 
 - Metodo: PUT
-- Rota: /api/v1/entries/{session_token}/{entry_id}
+- Rota: /api/v1/entries/{entry_id}
+- Autenticacao: `Authorization: Bearer <token>`
 - Body (todos os campos sao opcionais):
 
 ```json
@@ -205,7 +229,8 @@ Observacao: chamada autenticada bem-sucedida renova `expires_at_unix`, mas esta 
 ### 9. Excluir Chave
 
 - Metodo: DELETE
-- Rota: /api/v1/entries/{session_token}/{entry_id}
+- Rota: /api/v1/entries/{entry_id}
+- Autenticacao: `Authorization: Bearer <token>`
 - Resposta 204 sem body
 
 - Erros:
@@ -215,7 +240,8 @@ Observacao: chamada autenticada bem-sucedida renova `expires_at_unix`, mas esta 
 ### 10. Obter Senha por ID
 
 - Metodo: GET
-- Rota: /api/v1/entries/{session_token}/{entry_id}/password
+- Rota: /api/v1/entries/{entry_id}/password
+- Autenticacao: `Authorization: Bearer <token>`
 - Resposta 200:
 
 ```json
@@ -231,7 +257,8 @@ Observacao: chamada autenticada bem-sucedida renova `expires_at_unix`, mas esta 
 ### 11. Obter Notas por ID
 
 - Metodo: GET
-- Rota: /api/v1/entries/{session_token}/{entry_id}/notes
+- Rota: /api/v1/entries/{entry_id}/notes
+- Autenticacao: `Authorization: Bearer <token>`
 - Resposta 200:
 
 ```json
@@ -249,16 +276,19 @@ Observacao: chamada autenticada bem-sucedida renova `expires_at_unix`, mas esta 
 ### 12. Lock da Sessao
 
 - Metodo: POST
-- Rota: /api/v1/lock/{session_token}
+- Rota: /api/v1/lock
+- Autenticacao: `Authorization: Bearer <token>`
 - Resposta 204 sem body
 
 - Erros:
+- 401: header ausente ou formato invalido
 - 404: sessao nao encontrada
 
 ### 13. Trocar Senha Mestra
 
 - Metodo: PUT
-- Rota: /api/v1/session/{session_token}/password
+- Rota: /api/v1/session/password
+- Autenticacao: `Authorization: Bearer <token>`
 - Observacao: a sessao que executa a troca permanece ativa; todas as outras sessoes ativas sao invalidada e precisarao relogar.
 - Body:
 
@@ -291,11 +321,13 @@ Observacao: chamada autenticada bem-sucedida renova `expires_at_unix`, mas esta 
 
 - Implementado: sessao com timeout de inatividade configuravel, vida maxima absoluta, renovacao em atividade autenticada e invalidacao manual.
 - Implementado: troca de senha mestra com recriptografia do cofre, mantendo ativa apenas a sessao que realizou a alteracao.
-- Pendente: autenticacao por header (Bearer), assinatura de request e whitelist de origem.
-- Pendente: rate limit e auditoria local de acesso.
+- Implementado: autenticacao por header `Authorization: Bearer` (token fora da URL).
+- Implementado: validacao de `Host`/`Origin` contra DNS rebinding e sites externos.
+- Implementado: escrita atomica do cofre com backup `.bak`.
+- Pendente: rate limit no unlock e auditoria local de acesso (roadmap S3 no README).
 
 ## Roadmap imediato da API
 
-1. Migrar token de rota para header Authorization: Bearer.
+1. Rate limit / backoff no `POST /api/v1/unlock` (S3).
 2. Padronizar codigos de erro e schema de resposta de falha.
 3. Adicionar testes de integracao dos fluxos principais.
